@@ -1,8 +1,9 @@
 --[[ 
-    AXE TOGGLE LOCAL SCRIPT (OPTIMIZED)
+    AXE TOGGLE LOCAL SCRIPT (OPTIMIZED & DRAGGABLE)
     
     This script implements toggles for targeting NPCs and Players via a RemoteEvent.
-    Lag is reduced by decoupling the expensive target finding operation from the frame rate.
+    Lag is reduced by decoupling target finding from the frame rate.
+    The GUI toggle button and the main control frame are both draggable.
 --]]
 
 ----------------------------------------------------
@@ -26,7 +27,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local isNPCToggled = false        -- State for non-player targets (NPCs/Mobs)
 local isPlayerKillToggled = false -- State for player targets
 local ATTACK_INTERVAL = 5         -- Attack cooldown in seconds
-local TARGET_UPDATE_INTERVAL = 1.0  -- NEW: Search for targets once every 1 second (Less laggy)
+local TARGET_UPDATE_INTERVAL = 1.0  -- Search for targets once every 1 second (Less laggy)
 
 -- Stores targets found by the background task
 local nearbyTargets = {} 
@@ -39,7 +40,7 @@ local PLAYER_ON_COLOR = Color3.fromRGB(255, 87, 87)
 local TEXT_COLOR = Color3.fromRGB(238, 238, 238)
 
 ----------------------------------------------------
--- 3. TARGETING FUNCTIONS (Unchanged, but called less frequently)
+-- 3. TARGETING FUNCTIONS (Unchanged)
 ----------------------------------------------------
 
 -- Function to find non-player targets
@@ -130,7 +131,7 @@ NPCToggleButton.Font = Enum.Font.SourceSansBold
 NPCToggleButton.TextSize = 16
 Instance.new("UICorner", NPCToggleButton).CornerRadius = CORNER_RADIUS
 
--- 4.4. Player Kill Button (New Button)
+-- 4.4. Player Kill Button
 local PlayerKillButton = Instance.new("TextButton", ControlFrame)
 PlayerKillButton.Name = "PlayerKillButton"
 PlayerKillButton.Size = BUTTON_SIZE
@@ -177,7 +178,7 @@ end
 -- 6. DRAG AND CLICK EVENT HANDLERS
 ----------------------------------------------------
 
--- Efficient Drag Function for the ControlFrame (Unchanged)
+-- Efficient Drag Function for the ControlFrame and GUIToggleButton
 local function setupFrameDrag(frame)
     local dragging = false
     local dragInput = nil
@@ -222,6 +223,9 @@ GUIToggleButton.Activated:Connect(toggleUIVisibility)
 
 -- Apply the drag logic to the ControlFrame
 setupFrameDrag(ControlFrame)
+-- >>> NEW: Apply drag logic to the GUI Toggle Button <<<
+setupFrameDrag(GUIToggleButton)
+
 
 ----------------------------------------------------
 -- 7. OPTIMIZED BACKGROUND LOOPS
@@ -270,13 +274,13 @@ task.spawn(function()
         -- Use the pre-calculated targets
         if #nearbyTargets > 0 then
             
-            -- Debug printing (optional, remove this block if absolute minimum lag is required)
+            -- Debug printing 
             local targetNames = {}
             for _, targetModel in ipairs(nearbyTargets) do
                 table.insert(targetNames, '"' .. targetModel.Name .. '"')
             end
             local formattedList = "{ " .. table.concat(targetNames, ", ") .. " }"
-            print("Combined Targets (hb contents): " .. formattedList)
+            print("Combined Targets (target count: " .. #nearbyTargets .. ")")
             
             -- Fire the single remote event
             local args = {
