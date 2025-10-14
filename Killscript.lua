@@ -361,7 +361,7 @@ IntervalTextBox.FocusLost:Connect(function(enterPressed) if enterPressed then ap
 SetButton.Activated:Connect(applyIntervalInput)
 
 ----------------------------------------------------
--- 7. CORE ATTACK LOOP (INDIVIDUAL + SIMULTANEOUS)
+-- 7. CORE ATTACK LOOP (TARGET HUMANOIDS BASED ON TOGGLES)
 ----------------------------------------------------
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
@@ -371,27 +371,41 @@ RunService.Heartbeat:Connect(function()
         lastAttackTime = now
         local combinedTargets = {}
 
-        -- Gather NPCs if toggle ON
-        if isNPCToggled then
-            local npcTargets = getNonPlayerCharacterModels()
-            for _, model in ipairs(npcTargets) do
-                table.insert(combinedTargets, model)
+        -- Helper function to add valid humanoids
+        local function addValidTargets(models)
+            for _, model in ipairs(models) do
+                local humanoid = model:FindFirstChild("Humanoid")
+                if humanoid and humanoid.Health > 0 then
+                    table.insert(combinedTargets, model)
+                end
             end
         end
 
-        -- Gather Players if toggle ON
-        if isPlayerKillToggled then
-            local playerTargets = getPlayerCharacterModels()
-            for _, model in ipairs(playerTargets) do
-                table.insert(combinedTargets, model)
+        if isNPCToggled and isPlayerKillToggled then
+            -- Both toggles ON: target all humanoids
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                if obj:IsA("Model") and obj:FindFirstChild("Humanoid") then
+                    local humanoid = obj.Humanoid
+                    if humanoid.Health > 0 then
+                        table.insert(combinedTargets, obj)
+                    end
+                end
+            end
+        else
+            -- Only one toggle ON: target individually
+            if isNPCToggled then
+                addValidTargets(getNonPlayerCharacterModels())
+            end
+            if isPlayerKillToggled then
+                addValidTargets(getPlayerCharacterModels())
             end
         end
 
-        -- Fire RemoteEvent if there are any targets
+        -- Fire RemoteEvent if there are any valid targets
         if #combinedTargets > 0 then
             local args = {
                 {
-                    hb = combinedTargets, -- everything together
+                    hb = combinedTargets,
                     action = "hit",
                     combo = 1,
                     c = Character,
