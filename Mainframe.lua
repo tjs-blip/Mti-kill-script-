@@ -4,7 +4,7 @@
     This script implements toggles for targeting NPCs and Players via a RemoteEvent, 
     featuring a clean, draggable GUI and a separate visibility toggle.
     
-    UPDATE: The main control frame AND the GUI toggle button are now draggable.
+    UPDATE: Added a TextBox with a 'Set' button to allow dynamic adjustment of the attack interval.
 --]]
 
 ----------------------------------------------------
@@ -15,6 +15,7 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService") 
+local task = task -- Roblox's modern task scheduler library
 
 -- Player and Remote Event references
 local RemoteEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Axe")
@@ -25,9 +26,11 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 ----------------------------------------------------
 -- 2. CORE CONFIGURATION AND TOGGLE STATE
 ----------------------------------------------------
-local isNPCToggled = false        -- State for non-player targets (NPCs/Mobs)
-local isPlayerKillToggled = false -- NEW: State for player targets
-local ATTACK_INTERVAL = 5         -- Attack cooldown in seconds
+local isNPCToggled = false
+local isPlayerKillToggled = false
+
+local DEFAULT_INTERVAL = 5
+local currentInterval = DEFAULT_INTERVAL -- State variable for the active attack cooldown
 local lastAttackTime = 0
 
 -- Styling Constants for efficiency
@@ -36,6 +39,7 @@ local OFF_COLOR = Color3.fromRGB(57, 62, 70)
 local NPC_ON_COLOR = Color3.fromRGB(0, 173, 181) 
 local PLAYER_ON_COLOR = Color3.fromRGB(255, 87, 87) -- Distinct color for player targeting
 local TEXT_COLOR = Color3.fromRGB(238, 238, 238)
+local SET_BUTTON_COLOR = Color3.fromRGB(47, 204, 113) -- Green color for confirmation
 
 ----------------------------------------------------
 -- 3. TARGETING FUNCTIONS
@@ -60,7 +64,7 @@ local function getNonPlayerCharacterModels()
     return nonPlayerModels
 end
 
--- NEW: Function to find other player targets (excluding LocalPlayer)
+-- Function to find other player targets (excluding LocalPlayer)
 local function getPlayerCharacterModels()
     local playerModels = {}
     
@@ -79,11 +83,14 @@ end
 -- 4. GUI CREATION (CLEAN, DRAGGABLE STRUCTURE)
 ----------------------------------------------------
 
-local FRAME_WIDTH = 320 -- Increased width for two buttons
-local FRAME_HEIGHT = 50
+-- ADJUSTED DIMENSIONS for vertical layout
+local FRAME_WIDTH = 220  -- Increased width to accommodate input + button
+local FRAME_HEIGHT = 155 
 local TOGGLE_SIZE = 40
 local CORNER_RADIUS = UDim.new(0, 8) 
-local BUTTON_SIZE = UDim2.fromOffset(150, 40)
+local BUTTON_SIZE = UDim2.fromOffset(FRAME_WIDTH - 20, 40) -- Main buttons fit the frame width
+local INPUT_WIDTH = (FRAME_WIDTH - 30) * 0.7 -- ~70% of available width
+local SET_BUTTON_WIDTH = (FRAME_WIDTH - 30) * 0.3 -- ~30% of available width
 
 -- ScreenGui Container
 local ScreenGui = Instance.new("ScreenGui", PlayerGui)
@@ -109,14 +116,16 @@ ControlFrame.Size = UDim2.fromOffset(FRAME_WIDTH, FRAME_HEIGHT)
 ControlFrame.Position = UDim2.new(0.5, -FRAME_WIDTH/2, 0.5, -FRAME_HEIGHT/2) 
 ControlFrame.BackgroundColor3 = BACKGROUND_COLOR
 ControlFrame.BorderSizePixel = 0
-ControlFrame.Visible = true -- Explicitly set visible on spawn
+ControlFrame.Visible = true 
 
 -- Styling children of ControlFrame
 Instance.new("UICorner", ControlFrame).CornerRadius = CORNER_RADIUS
 local ListLayout = Instance.new("UIListLayout", ControlFrame)
-ListLayout.FillDirection = Enum.FillDirection.Horizontal
+ListLayout.FillDirection = Enum.FillDirection.Vertical -- Vertical layout for stack
 ListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-ListLayout.Padding = UDim.new(0, 10) 
+ListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+ListLayout.Padding = UDim.new(0, 5) 
+ListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 -- 4.3. NPC Toggle Button
 local NPCToggleButton = Instance.new("TextButton", ControlFrame)
@@ -127,9 +136,10 @@ NPCToggleButton.TextColor3 = TEXT_COLOR
 NPCToggleButton.Text = "NPC Attack (OFF)"
 NPCToggleButton.Font = Enum.Font.SourceSansBold
 NPCToggleButton.TextSize = 16
+NPCToggleButton.LayoutOrder = 1
 Instance.new("UICorner", NPCToggleButton).CornerRadius = CORNER_RADIUS
 
--- 4.4. Player Kill Button (New Button)
+-- 4.4. Player Kill Button
 local PlayerKillButton = Instance.new("TextButton", ControlFrame)
 PlayerKillButton.Name = "PlayerKillButton"
 PlayerKillButton.Size = BUTTON_SIZE
@@ -138,14 +148,71 @@ PlayerKillButton.TextColor3 = TEXT_COLOR
 PlayerKillButton.Text = "Player Kill (OFF)"
 PlayerKillButton.Font = Enum.Font.SourceSansBold
 PlayerKillButton.TextSize = 16
+PlayerKillButton.LayoutOrder = 2
 Instance.new("UICorner", PlayerKillButton).CornerRadius = CORNER_RADIUS
+
+-- 4.5. Interval Input Group (NEW ELEMENTS)
+local InputGroup = Instance.new("Frame", ControlFrame)
+InputGroup.Name = "InputGroup"
+InputGroup.Size = UDim2.fromOffset(FRAME_WIDTH - 20, 50)
+InputGroup.BackgroundColor3 = BACKGROUND_COLOR
+InputGroup.BorderSizePixel = 0
+InputGroup.LayoutOrder = 3
+
+local InputListLayout = Instance.new("UIListLayout", InputGroup)
+InputListLayout.FillDirection = Enum.FillDirection.Vertical
+InputListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+InputListLayout.Padding = UDim.new(0, 2) 
+
+local IntervalLabel = Instance.new("TextLabel", InputGroup)
+IntervalLabel.Size = UDim2.fromOffset(FRAME_WIDTH - 20, 15)
+IntervalLabel.BackgroundColor3 = BACKGROUND_COLOR
+IntervalLabel.TextColor3 = TEXT_COLOR
+IntervalLabel.Text = "Attack Interval (seconds):"
+IntervalLabel.Font = Enum.Font.SourceSans
+IntervalLabel.TextSize = 14
+
+-- Horizontal container for Textbox and Button
+local InputRow = Instance.new("Frame", InputGroup)
+InputRow.Name = "InputRow"
+InputRow.Size = UDim2.fromOffset(FRAME_WIDTH - 20, 30)
+InputRow.BackgroundColor3 = BACKGROUND_COLOR
+InputRow.BorderSizePixel = 0
+
+local RowListLayout = Instance.new("UIListLayout", InputRow)
+RowListLayout.FillDirection = Enum.FillDirection.Horizontal
+RowListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+RowListLayout.Padding = UDim.new(0, 5)
+
+local IntervalTextBox = Instance.new("TextBox", InputRow)
+IntervalTextBox.Name = "IntervalTextBox"
+IntervalTextBox.Size = UDim2.fromOffset(INPUT_WIDTH - 5, 30) -- Adjusted size
+IntervalTextBox.BackgroundColor3 = OFF_COLOR
+IntervalTextBox.TextColor3 = TEXT_COLOR
+IntervalTextBox.Text = tostring(currentInterval) -- Display current value
+IntervalTextBox.PlaceholderText = "seconds"
+IntervalTextBox.Font = Enum.Font.SourceSans
+IntervalTextBox.TextSize = 16
+IntervalTextBox.ClearTextOnFocus = false
+IntervalTextBox.TextEditable = true
+Instance.new("UICorner", IntervalTextBox).CornerRadius = UDim.new(0, 4)
+
+-- NEW: Set Button
+local SetButton = Instance.new("TextButton", InputRow)
+SetButton.Name = "SetButton"
+SetButton.Size = UDim2.fromOffset(SET_BUTTON_WIDTH, 30) -- Adjusted size
+SetButton.BackgroundColor3 = SET_BUTTON_COLOR
+SetButton.TextColor3 = TEXT_COLOR
+SetButton.Text = "Set"
+SetButton.Font = Enum.Font.SourceSansBold
+SetButton.TextSize = 16
+Instance.new("UICorner", SetButton).CornerRadius = UDim.new(0, 4)
 
 
 ----------------------------------------------------
 -- 5. TOGGLE STATE UPDATE FUNCTIONS
 ----------------------------------------------------
 
--- Function to handle button state updates efficiently
 local function updateButtonState(button, isToggled, onText, offText, onColor)
     button.Text = isToggled and onText or offText
     button.BackgroundColor3 = isToggled and onColor or OFF_COLOR
@@ -173,6 +240,25 @@ local function toggleUIVisibility()
     end
 end
 
+-- NEW: Function to process and apply the interval input
+local function applyIntervalInput()
+    local newText = IntervalTextBox.Text
+    local newInterval = tonumber(newText)
+
+    -- Validate input: must be a number greater than a very small delay (0.01s minimum)
+    if newInterval and newInterval >= 0.01 then
+        currentInterval = newInterval
+        IntervalTextBox.BackgroundColor3 = SET_BUTTON_COLOR -- Success color
+        task.delay(0.5, function() IntervalTextBox.BackgroundColor3 = OFF_COLOR end)
+    else
+        -- Input invalid or too small, revert text and show error color
+        IntervalTextBox.Text = tostring(currentInterval) -- Revert to last valid number
+        IntervalTextBox.BackgroundColor3 = PLAYER_ON_COLOR -- Error color (Red)
+        task.delay(0.5, function() IntervalTextBox.BackgroundColor3 = OFF_COLOR end)
+        print("Invalid attack interval. Must be a number (>= 0.01s).")
+    end
+end
+
 ----------------------------------------------------
 -- 6. DRAG AND CLICK EVENT HANDLERS
 ----------------------------------------------------
@@ -185,7 +271,10 @@ local function setupFrameDrag(frame)
 
     -- InputBegan: Start drag
     frame.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        -- Ensures you don't drag when interacting with a button or textbox
+        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and 
+           (not input.Target:IsA("TextBox") and not input.Target:IsA("TextButton")) then 
+            
             dragging = true
             dragStartPos = input.Position
             dragInput = input
@@ -216,17 +305,20 @@ local function setupFrameDrag(frame)
 end
 
 -- Setup click handlers 
-NPCToggleButton.Activated:Connect(toggleNPCTargetState) -- NPC toggle
-PlayerKillButton.Activated:Connect(togglePlayerKillState) -- NEW: Player toggle
+NPCToggleButton.Activated:Connect(toggleNPCTargetState)
+PlayerKillButton.Activated:Connect(togglePlayerKillState)
 GUIToggleButton.Activated:Connect(toggleUIVisibility)
+
+-- Connect the input validation handlers
+IntervalTextBox.FocusLost:Connect(function(enterPressed) 
+    if enterPressed then applyIntervalInput() end
+end)
+SetButton.Activated:Connect(applyIntervalInput)
 
 -- Apply the drag logic to the ControlFrame
 setupFrameDrag(ControlFrame)
-
--- [[ START OF NEW DRAG LOGIC ]]
 -- Apply the drag logic to the GUIToggleButton
 setupFrameDrag(GUIToggleButton)
--- [[ END OF NEW DRAG LOGIC ]]
 
 ----------------------------------------------------
 -- 7. CORE ATTACK LOOP (SINGLE FIRE)
@@ -235,8 +327,8 @@ setupFrameDrag(GUIToggleButton)
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
     
-    -- Check: If EITHER toggle is ON AND the interval is met
-    if (isNPCToggled or isPlayerKillToggled) and (now - lastAttackTime >= ATTACK_INTERVAL) then
+    -- Check: If EITHER toggle is ON AND the attack interval (currentInterval) is met
+    if (isNPCToggled or isPlayerKillToggled) and (now - lastAttackTime >= currentInterval) then
         lastAttackTime = now -- Reset timer immediately
 
         local combinedTargets = {}
