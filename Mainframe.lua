@@ -3,6 +3,8 @@
     
     This script implements toggles for targeting NPCs and Players via a RemoteEvent, 
     featuring a clean, draggable GUI and a separate visibility toggle.
+    
+    UPDATE: The main control frame AND the GUI toggle button are now draggable.
 --]]
 
 ----------------------------------------------------
@@ -220,6 +222,11 @@ GUIToggleButton.Activated:Connect(toggleUIVisibility)
 
 -- Apply the drag logic to the ControlFrame
 setupFrameDrag(ControlFrame)
+
+-- [[ START OF NEW DRAG LOGIC ]]
+-- Apply the drag logic to the GUIToggleButton
+setupFrameDrag(GUIToggleButton)
+-- [[ END OF NEW DRAG LOGIC ]]
 
 ----------------------------------------------------
 -- 7. CORE ATTACK LOOP (SINGLE FIRE)
