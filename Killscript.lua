@@ -361,30 +361,37 @@ IntervalTextBox.FocusLost:Connect(function(enterPressed) if enterPressed then ap
 SetButton.Activated:Connect(applyIntervalInput)
 
 ----------------------------------------------------
--- 7. CORE ATTACK LOOP
+-- 7. CORE ATTACK LOOP (INDIVIDUAL + SIMULTANEOUS)
 ----------------------------------------------------
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
+
+    -- Only run if either toggle is ON and interval has passed
     if (isNPCToggled or isPlayerKillToggled) and (now - lastAttackTime >= currentInterval) then
         lastAttackTime = now
         local combinedTargets = {}
 
+        -- Gather NPCs if toggle ON
         if isNPCToggled then
-            for _, targetModel in ipairs(getNonPlayerCharacterModels()) do
-                table.insert(combinedTargets, targetModel)
+            local npcTargets = getNonPlayerCharacterModels()
+            for _, model in ipairs(npcTargets) do
+                table.insert(combinedTargets, model)
             end
         end
 
+        -- Gather Players if toggle ON
         if isPlayerKillToggled then
-            for _, targetModel in ipairs(getPlayerCharacterModels()) do
-                table.insert(combinedTargets, targetModel)
+            local playerTargets = getPlayerCharacterModels()
+            for _, model in ipairs(playerTargets) do
+                table.insert(combinedTargets, model)
             end
         end
 
+        -- Fire RemoteEvent if there are any targets
         if #combinedTargets > 0 then
             local args = {
                 {
-                    hb = combinedTargets,
+                    hb = combinedTargets, -- everything together
                     action = "hit",
                     combo = 1,
                     c = Character,
