@@ -361,7 +361,7 @@ IntervalTextBox.FocusLost:Connect(function(enterPressed) if enterPressed then ap
 SetButton.Activated:Connect(applyIntervalInput)
 
 ----------------------------------------------------
--- 7. CORE ATTACK LOOP (TARGET HUMANOIDS BASED ON TOGGLES)
+-- 7. CORE ATTACK LOOP (NPC + PLAYER TOGGLE)
 ----------------------------------------------------
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
@@ -371,9 +371,9 @@ RunService.Heartbeat:Connect(function()
         lastAttackTime = now
         local combinedTargets = {}
 
-        -- Helper function to add valid humanoids
-        local function addValidTargets(models)
-            for _, model in ipairs(models) do
+        -- Helper function to add valid targets
+        local function addValidTargets(targets)
+            for _, model in ipairs(targets) do
                 local humanoid = model:FindFirstChild("Humanoid")
                 if humanoid and humanoid.Health > 0 then
                     table.insert(combinedTargets, model)
@@ -381,24 +381,14 @@ RunService.Heartbeat:Connect(function()
             end
         end
 
-        if isNPCToggled and isPlayerKillToggled then
-            -- Both toggles ON: target all humanoids
-            for _, obj in ipairs(workspace:GetDescendants()) do
-                if obj:IsA("Model") and obj:FindFirstChild("Humanoid") then
-                    local humanoid = obj.Humanoid
-                    if humanoid.Health > 0 then
-                        table.insert(combinedTargets, obj)
-                    end
-                end
-            end
-        else
-            -- Only one toggle ON: target individually
-            if isNPCToggled then
-                addValidTargets(getNonPlayerCharacterModels())
-            end
-            if isPlayerKillToggled then
-                addValidTargets(getPlayerCharacterModels())
-            end
+        -- Add NPCs if toggle ON
+        if isNPCToggled then
+            addValidTargets(getNonPlayerCharacterModels())
+        end
+
+        -- Add Players if toggle ON
+        if isPlayerKillToggled then
+            addValidTargets(getPlayerCharacterModels())
         end
 
         -- Fire RemoteEvent if there are any valid targets
