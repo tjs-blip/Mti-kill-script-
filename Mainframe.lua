@@ -4,7 +4,7 @@
     This script implements toggles for targeting NPCs and Players via a RemoteEvent, 
     featuring a clean, draggable GUI and a separate visibility toggle.
     
-    UPDATE: Added a TextBox with a 'Set' button to allow dynamic adjustment of the attack interval.
+    UPDATE: Drag functionality fixed to correctly allow dragging the GUI toggle button and the main panel.
 --]]
 
 ----------------------------------------------------
@@ -240,7 +240,7 @@ local function toggleUIVisibility()
     end
 end
 
--- NEW: Function to process and apply the interval input
+-- Function to process and apply the interval input
 local function applyIntervalInput()
     local newText = IntervalTextBox.Text
     local newInterval = tonumber(newText)
@@ -260,7 +260,7 @@ local function applyIntervalInput()
 end
 
 ----------------------------------------------------
--- 6. DRAG AND CLICK EVENT HANDLERS
+-- 6. DRAG AND CLICK EVENT HANDLERS (FIXED DRAG LOGIC)
 ----------------------------------------------------
 
 -- Efficient Drag Function for the ControlFrame
@@ -271,14 +271,20 @@ local function setupFrameDrag(frame)
 
     -- InputBegan: Start drag
     frame.InputBegan:Connect(function(input)
-        -- Ensures you don't drag when interacting with a button or textbox
-        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and 
-           (not input.Target:IsA("TextBox") and not input.Target:IsA("TextButton")) then 
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             
-            dragging = true
-            dragStartPos = input.Position
-            dragInput = input
-            frame.ZIndex = 2 -- Bring frame to front
+            -- Check if the target is an interactive child (TextBox/Button)
+            local isTargetInteractiveChild = input.Target:IsA("TextBox") or input.Target:IsA("TextButton")
+            -- Check if the target is the frame/button itself being dragged
+            local isTargetFrame = input.Target == frame
+            
+            -- Allow drag if the target is NOT an interactive child OR if the target IS the frame itself (necessary for GUIToggleButton)
+            if not isTargetInteractiveChild or isTargetFrame then
+                dragging = true
+                dragStartPos = input.Position
+                dragInput = input
+                frame.ZIndex = 2 -- Bring frame to front
+            end
         end
     end)
     
