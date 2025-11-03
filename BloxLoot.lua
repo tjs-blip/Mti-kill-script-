@@ -201,14 +201,10 @@ local function updateEnemies()
     if now - lastEnemiesUpdate < updateEnemiesInterval then return end
     lastEnemiesUpdate = now
 
-    -- use cached enemies folder if available, otherwise try to locate it once
+    -- strictly use cached enemies folder; skip scanning until cache is populated
     local enemyFolder = enemiesFolderRef
     if not enemyFolder then
-        local runtime = Workspace:FindFirstChild("Runtime")
-        enemyFolder = runtime and runtime:FindFirstChild("Enemies")
-        if enemyFolder then enemiesFolderRef = enemyFolder end
-    end
-    if not enemyFolder then
+        -- cache not ready yet; avoid extra lookups and skip this scan
         enemiesCache = {}
         return
     end
