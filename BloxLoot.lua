@@ -37,6 +37,17 @@ local maxTargetsPerInvoke = 12 -- limit targets sent per InvokeServer
 local updateEnemiesInterval = 0.25 -- seconds between full enemy scans
 local lastEnemiesUpdate = 0
 
+-- cache for the enemies folder (resolve once)
+local enemiesFolderRef = nil
+
+-- resolve the enemies folder in background so we don't repeatedly FindFirstChild
+task.spawn(function()
+    local runtime = Workspace:FindFirstChild("Runtime") or Workspace:WaitForChild("Runtime")
+    if runtime then
+        enemiesFolderRef = runtime:FindFirstChild("Enemies") or runtime:WaitForChild("Enemies")
+    end
+end)
+
 -- NEW: connection tracking and lifecycle flag
 local connections = {}
 local function track(conn)
@@ -190,8 +201,13 @@ local function updateEnemies()
     if now - lastEnemiesUpdate < updateEnemiesInterval then return end
     lastEnemiesUpdate = now
 
-    local runtime = Workspace:FindFirstChild("Runtime")
-    local enemyFolder = runtime and runtime:FindFirstChild("Enemies")
+    -- use cached enemies folder if available, otherwise try to locate it once
+    local enemyFolder = enemiesFolderRef
+    if not enemyFolder then
+        local runtime = Workspace:FindFirstChild("Runtime")
+        enemyFolder = runtime and runtime:FindFirstChild("Enemies")
+        if enemyFolder then enemiesFolderRef = enemyFolder end
+    end
     if not enemyFolder then
         enemiesCache = {}
         return
@@ -228,7 +244,7 @@ local function updateHighlights()
     if not rootPart then return end
     for enemy, box in pairs(highlightedEnemies) do
         if not enemiesCache[enemy] or not box.Parent then
-            if box then box:Destroy() end
+            if box then releaseSelectionBox(box) end
             highlightedEnemies[enemy] = nil
         end
     end
@@ -309,13 +325,10 @@ task.spawn(function()
                     -- clear reusable table
                     for k in pairs(attackTable) do attackTable[k] = nil end
 
-                    local added = 0
                     for model, part in pairs(enemiesCache) do
                         local actorId = model:FindFirstChild("ActorId")
                         if actorId then
                             attackTable[actorId.Value] = part
-                            added = added + 1
-                            if added >= maxTargetsPerInvoke then break end
                         end
                     end
 
