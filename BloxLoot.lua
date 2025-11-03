@@ -17,6 +17,9 @@ local savedSettings = {
     wasAttacking = false
 }
 
+-- squared radius cached for cheaper distance checks
+savedSettings.radiusSq = savedSettings.radius * savedSettings.radius
+
 --== VARIABLES ==
 local character
 local rootPart
@@ -26,6 +29,13 @@ local toggleButton
 local currentAttackFunction
 local cachedAttackFunctions = {}
 local radiusIndicator
+
+-- performance tuning
+local selectionBoxPool = {}
+local maxHighlights = 32 -- cap how many selection boxes we keep alive
+local maxTargetsPerInvoke = 12 -- limit targets sent per InvokeServer
+local updateEnemiesInterval = 0.25 -- seconds between full enemy scans
+local lastEnemiesUpdate = 0
 
 -- NEW: connection tracking and lifecycle flag
 local connections = {}
@@ -55,6 +65,41 @@ local function findLatestTool()
     end
 
     return newestTool
+end
+
+-- fast squared-distance helper (avoids Magnitude / sqrt)
+local function sqrDist(a, b)
+    local dx = a.X - b.X
+    local dy = a.Y - b.Y
+    local dz = a.Z - b.Z
+    return dx*dx + dy*dy + dz*dz
+end
+
+local function getSelectionBox()
+    local box = table.remove(selectionBoxPool)
+    if box and box.Parent then
+        -- ensure not attached
+        box.Parent = nil
+    end
+    if not box then
+        box = Instance.new("SelectionBox")
+        box.LineThickness = 0.05
+        box.Color3 = Color3.fromRGB(0,170,255)
+    end
+    return box
+end
+
+local function releaseSelectionBox(box)
+    if not box then return end
+    pcall(function()
+        box.Adornee = nil
+        box.Parent = nil
+    end)
+    if #selectionBoxPool < maxHighlights then
+        table.insert(selectionBoxPool, box)
+    else
+        pcall(function() box:Destroy() end)
+    end
 end
 
 local function getAttackFunction()
@@ -140,17 +185,30 @@ end
 
 --== ENEMY DETECTION ==
 local function updateEnemies()
-    local enemyFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Enemies")
-    if not enemyFolder or not rootPart then return end
+    if not rootPart then return end
+    local now = tick()
+    if now - lastEnemiesUpdate < updateEnemiesInterval then return end
+    lastEnemiesUpdate = now
+
+    local runtime = Workspace:FindFirstChild("Runtime")
+    local enemyFolder = runtime and runtime:FindFirstChild("Enemies")
+    if not enemyFolder then
+        enemiesCache = {}
+        return
+    end
 
     local newCache = {}
     for _, model in pairs(enemyFolder:GetChildren()) do
-        if model:IsA("Model") and model:FindFirstChild("ActorId") and model:FindFirstChild("Humanoid") then
-            local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-            if part then
-                local distance = (part.Position - rootPart.Position).Magnitude
-                if distance <= savedSettings.radius then
-                    newCache[model] = part
+        if model:IsA("Model") then
+            local actorId = model:FindFirstChild("ActorId")
+            local humanoid = model:FindFirstChild("Humanoid")
+            if actorId and humanoid then
+                local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                if part then
+                    local dsq = sqrDist(part.Position, rootPart.Position)
+                    if dsq <= savedSettings.radiusSq then
+                        newCache[model] = part
+                    end
                 end
             end
         end
@@ -161,7 +219,7 @@ end
 --== ENEMY HIGHLIGHTS ==
 local function clearHighlights()
     for _, box in pairs(highlightedEnemies) do
-        if box and box.Parent then box:Destroy() end
+        if box then releaseSelectionBox(box) end
     end
     highlightedEnemies = {}
 end
@@ -176,19 +234,17 @@ local function updateHighlights()
     end
 
     for model, part in pairs(enemiesCache) do
-        local distance = (part.Position - rootPart.Position).Magnitude
-        if distance <= savedSettings.radius then
+        local dsq = sqrDist(part.Position, rootPart.Position)
+        if dsq <= savedSettings.radiusSq then
             if not highlightedEnemies[model] then
-                local box = Instance.new("SelectionBox")
+                local box = getSelectionBox()
                 box.Adornee = part
-                box.LineThickness = 0.05
-                box.Color3 = Color3.fromRGB(0,170,255)
                 box.Parent = part
                 highlightedEnemies[model] = box
             end
         else
             if highlightedEnemies[model] then
-                highlightedEnemies[model]:Destroy()
+                releaseSelectionBox(highlightedEnemies[model])
                 highlightedEnemies[model] = nil
             end
         end
@@ -253,13 +309,13 @@ task.spawn(function()
                     -- clear reusable table
                     for k in pairs(attackTable) do attackTable[k] = nil end
 
+                    local added = 0
                     for model, part in pairs(enemiesCache) do
                         local actorId = model:FindFirstChild("ActorId")
                         if actorId then
-                            local distance = (part.Position - rootPart.Position).Magnitude
-                            if distance <= savedSettings.radius then
-                                attackTable[actorId.Value] = part
-                            end
+                            attackTable[actorId.Value] = part
+                            added = added + 1
+                            if added >= maxTargetsPerInvoke then break end
                         end
                     end
 
@@ -318,19 +374,6 @@ local function applyHover(btn, opts)
 end
 
 -- MAIN FRAME (modern/stylish)
--- create subtle shadow behind the panel
-local shadow = Instance.new("Frame")
-shadow.Name = "Shadow"
-shadow.Size = UDim2.new(0, 290, 0, 190)
-shadow.Position = UDim2.new(0.05, 6, 0.25, 6)
-shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-shadow.BackgroundTransparency = 0.75
-shadow.ZIndex = 0
-shadow.BorderSizePixel = 0
-shadow.Parent = ScreenGui
-local shadowCorner = Instance.new("UICorner", shadow)
-shadowCorner.CornerRadius = UDim.new(0,18)
-
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "Main"
 mainFrame.Size = UDim2.new(0,280,0,180)
@@ -474,6 +517,11 @@ createApply(UDim2.new(0,180,0,48), function()
     local val = tonumber(radiusBox.Text)
     if val and val > 0 then
         savedSettings.radius = val
+        savedSettings.radiusSq = val * val
+        if radiusIndicator and rootPart then
+            radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
+            radiusIndicator.Position = rootPart.Position
+        end
     else
         radiusBox.Text = tostring(savedSettings.radius)
     end
