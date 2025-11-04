@@ -4,7 +4,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService") -- added TweenService
+local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 repeat task.wait() until player
@@ -12,13 +12,10 @@ repeat task.wait() until player
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
     radius = 20,
-    attackInterval = 0.1,
+    attackInterval = 0.5,
     attacking = false,
     wasAttacking = false
 }
-
--- squared radius cached for cheaper distance checks
-savedSettings.radiusSq = savedSettings.radius * savedSettings.radius
 
 --== VARIABLES ==
 local character
@@ -29,17 +26,6 @@ local toggleButton
 local currentAttackFunction
 local cachedAttackFunctions = {}
 local radiusIndicator
-
--- Performance optimized settings
-local selectionBoxPool = {}
-local maxHighlights = 16  -- reduced max highlights to decrease rendering load
-local updateEnemiesInterval = 0.4  -- increased interval to reduce spatial queries
-local lastEnemiesUpdate = 0
-local maxPartsPerQuery = 50  -- limit parts per Region3 query
-local highlightUpdateThrottle = 0.1  -- reduced highlight update frequency
-local lastHighlightUpdate = 0
-local enemyCacheCleanupInterval = 2  -- seconds between cache cleanup
-local lastCacheCleanup = 0
 
 -- Get enemies folder reference
 local enemiesFolder
@@ -145,15 +131,15 @@ local function getAttackFunction()
     end
 end
 
--- Use Heartbeat instead of RenderStepped for better performance
-local highlightConnection = track(RunService.Heartbeat:Connect(function()
-    if not scriptAlive then return end
-    local now = tick()
-    if now - lastHighlightUpdate >= highlightUpdateThrottle then
+local highlightThrottle = 0.05
+local highlightTimer = 0
+RunService.RenderStepped:Connect(function(dt)
+    highlightTimer += dt
+    if highlightTimer >= highlightThrottle then
         updateHighlights()
-        lastHighlightUpdate = now
+        highlightTimer = 0
     end
-end))
+end)
 
 -- Auto-refresh when new tools appear/disappear (store child connections and loop guard)
 task.spawn(function()
@@ -203,7 +189,9 @@ end
 
 -- Create radius visualization part
 local function createRadiusIndicator()
-    if radiusIndicator then return end
+    if radiusIndicator then 
+        radiusIndicator:Destroy()
+    end
     
     radiusIndicator = Instance.new("Part")
     radiusIndicator.Name = "RadiusIndicator"
@@ -214,7 +202,10 @@ local function createRadiusIndicator()
     radiusIndicator.Color = Color3.fromRGB(0, 170, 255)
     radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
     radiusIndicator.Shape = Enum.PartType.Cylinder
-    radiusIndicator.CFrame = CFrame.new(Vector3.new(0,0,0)) * CFrame.Angles(0, 0, math.rad(90))
+    
+    if rootPart then
+        radiusIndicator.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, 0, math.rad(90))
+    end
     
     -- Create highlight effect
     local highlight = Instance.new("Highlight")
@@ -229,96 +220,60 @@ end
 
 --== ENEMY DETECTION ==
 local function updateEnemies()
-    if not rootPart or not enemiesFolder then return end
-    local now = tick()
-    if now - lastEnemiesUpdate < updateEnemiesInterval then return end
-    lastEnemiesUpdate = now
-    
-    -- Update radius indicator position less frequently
-    if radiusIndicator and (now - lastHighlightUpdate >= highlightUpdateThrottle) then
-        radiusIndicator.Position = rootPart.Position
-        lastHighlightUpdate = now
-    end
+    local enemyFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Enemies")
+    if not enemyFolder or not rootPart then return end
 
-    -- Use Region3 with optimized size and limits
-    local playerPos = rootPart.Position
-    local region = Region3.new(
-        playerPos - Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius),
-        playerPos + Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius)
-    )
-    
-    -- Efficient parts query with limit
-    local parts = workspace:FindPartsInRegion3WithIgnoreList(
-        region, 
-        {character}, -- ignore player's character
-        maxPartsPerQuery
-    )
-    
-    -- Clean old cache periodically
-    if now - lastCacheCleanup >= enemyCacheCleanupInterval then
-        enemiesCache = {}
-        lastCacheCleanup = now
-    end
-    
-    -- Process parts efficiently
-    for _, part in ipairs(parts) do
-        -- Quick parent check before expensive operations
-        local parent = part.Parent
-        if parent and parent.Parent == enemiesFolder then
-            local dsq = sqrDist(part.Position, playerPos)
-            if dsq <= savedSettings.radiusSq then
-                enemiesCache[parent] = part
+    local newCache = {}
+    for _, model in pairs(enemyFolder:GetChildren()) do
+        if model:IsA("Model") and model:FindFirstChild("ActorId") and model:FindFirstChild("Humanoid") then
+            local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+            if part then
+                local distance = (part.Position - rootPart.Position).Magnitude
+                if distance <= savedSettings.radius then
+                    newCache[model] = part
+                end
             end
         end
     end
+    enemiesCache = newCache
 end
 
 --== ENEMY HIGHLIGHTS ==
 local function clearHighlights()
     for _, box in pairs(highlightedEnemies) do
-        if box then releaseSelectionBox(box) end
+        if box and box.Parent then box:Destroy() end
     end
     highlightedEnemies = {}
 end
 
 local function updateHighlights()
     if not rootPart then return end
-    
-    -- Get current position once
-    local currentPos = rootPart.Position
-    local currentRadiusSq = savedSettings.radiusSq
-    
-    -- Clean up stale highlights
-    for enemy, highlight in pairs(highlightedEnemies) do
-        if not enemiesCache[enemy] then
-            if highlight then
-                releaseSelectionBox(highlight)
-            end
+    for enemy, box in pairs(highlightedEnemies) do
+        if not enemiesCache[enemy] or not box.Parent then
+            if box then box:Destroy() end
             highlightedEnemies[enemy] = nil
         end
     end
 
-    -- Highlight all enemies in cache
     for model, part in pairs(enemiesCache) do
-        if not highlightedEnemies[model] then
-            local highlight = getSelectionBox()
-            -- Apply highlight to the whole model instead of just the part
-            highlight.Adornee = model
-            highlight.Parent = model
-            highlightedEnemies[model] = highlight
-            
-            -- Make highlight more visible when attacking
-            if savedSettings.attacking then
-                highlight.FillTransparency = 0.5
-                highlight.OutlineTransparency = 0
+        local distance = (part.Position - rootPart.Position).Magnitude
+        if distance <= savedSettings.radius then
+            if not highlightedEnemies[model] then
+                local box = Instance.new("SelectionBox")
+                box.Adornee = part
+                box.LineThickness = 0.05
+                box.Color3 = Color3.fromRGB(0,170,255)
+                box.Parent = part
+                highlightedEnemies[model] = box
             end
-        elseif savedSettings.attacking then
-            -- Update existing highlight visibility
-            local highlight = highlightedEnemies[model]
-            highlight.FillTransparency = 0.5
-            highlight.OutlineTransparency = 0
+        else
+            if highlightedEnemies[model] then
+                highlightedEnemies[model]:Destroy()
+                highlightedEnemies[model] = nil
+            end
         end
     end
+end
 end
 
 --== CHARACTER HANDLING ==
@@ -363,39 +318,40 @@ if player.Character then
     onCharacterAdded(player.Character)
 end
 
---== AUTO ATTACK LOOP ==
+--== AUTO ATTACK LOOP (RADIUS FILTERED) ==
 task.spawn(function()
-    while scriptAlive do
+    while true do
         if savedSettings.attacking then
             local attackFunc = getCurrentAttackFunction()
-            if attackFunc then
-                -- Force update enemies every attack cycle
-                if rootPart and enemiesFolder then
-                    -- Use Region3 with optimized size and limits
-                    local playerPos = rootPart.Position
-                    local region = Region3.new(
-                        playerPos - Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius),
-                        playerPos + Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius)
-                    )
-                    
-                    -- Get parts in region
-                    local parts = workspace:FindPartsInRegion3WithIgnoreList(
-                        region, 
-                        {character}, 
-                        maxPartsPerQuery
-                    )
-                    
-                    -- Process parts efficiently
-                    for _, part in ipairs(parts) do
-                        local parent = part.Parent
-                        if parent and parent.Parent == enemiesFolder then
-                            local dsq = sqrDist(part.Position, playerPos)
-                            if dsq <= savedSettings.radiusSq then
-                                enemiesCache[parent] = part
-                            end
+            if not attackFunc or not rootPart then
+                task.wait(0.1)
+                continue
+            end
+
+            updateEnemies()
+
+            if next(enemiesCache) then
+                local attackTable = {}
+                for model, part in pairs(enemiesCache) do
+                    local actorId = model:FindFirstChild("ActorId")
+                    if actorId then
+                        local distance = (part.Position - rootPart.Position).Magnitude
+                        if distance <= savedSettings.radius then
+                            attackTable[actorId.Value] = part
                         end
                     end
                 end
+
+                if next(attackTable) then
+                    local success, err = pcall(function()
+                        attackFunc:InvokeServer(attackTable)
+                    end)
+                    if not success then
+                        warn("[AutoAttack] InvokeServer failed: " .. tostring(err))
+                        currentAttackFunction = nil
+                    end
+                end
+            end
                 
                 local targets = {}
                 -- Use all enemies in range
