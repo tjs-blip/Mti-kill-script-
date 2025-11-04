@@ -13,13 +13,14 @@ repeat task.wait() until player and player.Parent and player:FindFirstChild("Pla
 --== CONNECTION MANAGEMENT & CLEANUP ==
 local connections = {}
 local scriptAlive = true
+local GUI_NAME = "AutoAttackGui"
 
 local function cleanup()
-    -- 1. Stop all loops immediately
+    -- 1. Stop all loops immediately by setting flag
     scriptAlive = false
     savedSettings.attacking = false
     
-    -- 2. Disconnect all connections
+    -- 2. Disconnect all saved connections
     for _, conn in ipairs(connections) do
         if conn and typeof(conn) == "RBXScriptConnection" then
             conn:Disconnect()
@@ -34,14 +35,15 @@ local function cleanup()
     if existingGui then
         existingGui:Destroy()
     end
+    
+    warn("[AutoAttack Cleanup] Successfully terminated all loops, disconnected all events, and destroyed GUI.")
 
-    -- 5. Terminate the script instance
+    -- 5. Terminate the script instance (kills all residual execution contexts)
     script:Destroy()
 end
 
 --== GUARD CLAUSE: PREVENT DUPLICATES & CLEANUP ==
 local PlayerGui = player:FindFirstChild("PlayerGui")
-local GUI_NAME = "AutoAttackGui"
 
 if not PlayerGui then 
     warn("[AutoAttack Guard] PlayerGui not found. Terminating new script.") 
@@ -56,12 +58,12 @@ if existingGui then
     
     local oldScript = existingGui.Parent
     
+    -- Attempt to destroy the parent script instance
     if oldScript and oldScript:IsA("LocalScript") and oldScript ~= script then 
         warn("[AutoAttack Guard] Destroying old LocalScript instance.")
-        -- The script destruction *should* stop its execution, but a safe cleanup is ideal.
-        oldScript:Destroy()
+        oldScript:Destroy() -- This effectively kills the old script's execution
     else
-        existingGui:Destroy()
+        existingGui:Destroy() -- Clean up the old GUI if the script couldn't be located/killed
     end
     
 	task.wait(0.1) 
@@ -72,8 +74,7 @@ end
 local savedSettings = {
 	radius = 20,
 	attackInterval = 0.5,
-	attacking = false,
-	wasAttacking = false
+	attacking = false, -- Always start FALSE on fresh injection
 }
 
 --== VARIABLES ==
@@ -162,7 +163,7 @@ task.spawn(function()
         end
     end))
 
-	while scriptAlive do -- Check loop termination flag
+	while scriptAlive do 
 		if not currentAttackFunction or not currentAttackFunction.Parent then
 			refreshTool()
 		end
@@ -177,7 +178,7 @@ local function getCurrentAttackFunction()
 	return currentAttackFunction
 end
 
---== ENEMY DETECTION ==
+--== ENEMY DETECTION & VISUALS ==
 local function updateEnemies()
 	local enemyFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Enemies")
 	if not enemyFolder or not rootPart then return end
@@ -197,7 +198,6 @@ local function updateEnemies()
 	enemiesCache = newCache
 end
 
---== ENEMY HIGHLIGHTS ==
 local function clearHighlights()
 	for _, box in pairs(highlightedEnemies) do
 		if box and box.Parent then box:Destroy() end
@@ -254,21 +254,13 @@ local function onCharacterAdded(char)
 	character = char
 	rootPart = character and character:WaitForChild("HumanoidRootPart") 
 	clearHighlights()
-	
-	savedSettings.wasAttacking = savedSettings.attacking
 
 	repeat
 		currentAttackFunction = getCurrentAttackFunction()
 		task.wait(0.2)
-	until currentAttackFunction or not scriptAlive -- Ensure we stop waiting if script is killed
+	until currentAttackFunction or not scriptAlive 
 
-	if savedSettings.wasAttacking and scriptAlive then
-		savedSettings.attacking = true
-		if toggleButton then
-			toggleButton.Text = "Stop"
-			toggleButton.BackgroundColor3 = Color3.fromRGB(170,0,0)
-		end
-	end
+    -- IMPORTANT: NO logic here to automatically re-enable savedSettings.attacking
 end
 
 -- Storing Connections
@@ -286,7 +278,7 @@ end
 
 --== AUTO ATTACK LOOP (RADIUS FILTERED) ==
 task.spawn(function()
-	while scriptAlive do -- Check loop termination flag
+	while scriptAlive do 
 		if savedSettings.attacking then
 			local attackFunc = getCurrentAttackFunction()
 			if not attackFunc or not rootPart then
