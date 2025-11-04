@@ -274,7 +274,6 @@ local function updateHighlights()
         end
     end
 end
-end
 
 --== CHARACTER HANDLING ==
 local function onCharacterAdded(char)
