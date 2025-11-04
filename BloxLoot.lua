@@ -30,11 +30,16 @@ local currentAttackFunction
 local cachedAttackFunctions = {}
 local radiusIndicator
 
--- permanent enemy tracking
+-- Performance optimized settings
 local selectionBoxPool = {}
-local maxHighlights = 32 -- cap how many selection boxes we keep alive
-local updateEnemiesInterval = 0.25 -- seconds between full enemy scans
+local maxHighlights = 16  -- reduced max highlights to decrease rendering load
+local updateEnemiesInterval = 0.4  -- increased interval to reduce spatial queries
 local lastEnemiesUpdate = 0
+local maxPartsPerQuery = 50  -- limit parts per Region3 query
+local highlightUpdateThrottle = 0.1  -- reduced highlight update frequency
+local lastHighlightUpdate = 0
+local enemyCacheCleanupInterval = 2  -- seconds between cache cleanup
+local lastCacheCleanup = 0
 
 -- Get enemies folder reference
 local enemiesFolder
@@ -133,15 +138,13 @@ local function getAttackFunction()
     end
 end
 
--- Replace previous anonymous RenderStepped connection with tracked one
-local highlightThrottle = 0.05
-local highlightTimer = 0
-local highlightConnection = track(RunService.RenderStepped:Connect(function(dt)
+-- Use Heartbeat instead of RenderStepped for better performance
+local highlightConnection = track(RunService.Heartbeat:Connect(function()
     if not scriptAlive then return end
-    highlightTimer = highlightTimer + dt
-    if highlightTimer >= highlightThrottle then
+    local now = tick()
+    if now - lastHighlightUpdate >= highlightUpdateThrottle then
         updateHighlights()
-        highlightTimer = 0
+        lastHighlightUpdate = now
     end
 end))
 
@@ -191,31 +194,73 @@ local function getCurrentAttackFunction()
     return currentAttackFunction
 end
 
+-- Create radius visualization part
+local function createRadiusIndicator()
+    if radiusIndicator then return end
+    
+    radiusIndicator = Instance.new("Part")
+    radiusIndicator.Name = "RadiusIndicator"
+    radiusIndicator.Anchored = true
+    radiusIndicator.CanCollide = false
+    radiusIndicator.Transparency = 0.8
+    radiusIndicator.Material = Enum.Material.Neon
+    radiusIndicator.Color = Color3.fromRGB(0, 170, 255)
+    radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
+    radiusIndicator.Shape = Enum.PartType.Cylinder
+    radiusIndicator.CFrame = CFrame.new(Vector3.new(0,0,0)) * CFrame.Angles(0, 0, math.rad(90))
+    
+    -- Create highlight effect
+    local highlight = Instance.new("Highlight")
+    highlight.FillTransparency = 0.95
+    highlight.OutlineTransparency = 0.7
+    highlight.FillColor = Color3.fromRGB(0, 170, 255)
+    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+    highlight.Parent = radiusIndicator
+    
+    radiusIndicator.Parent = workspace
+end
+
 --== ENEMY DETECTION ==
 local function updateEnemies()
     if not rootPart or not enemiesFolder then return end
     local now = tick()
     if now - lastEnemiesUpdate < updateEnemiesInterval then return end
     lastEnemiesUpdate = now
+    
+    -- Update radius indicator position less frequently
+    if radiusIndicator and (now - lastHighlightUpdate >= highlightUpdateThrottle) then
+        radiusIndicator.Position = rootPart.Position
+        lastHighlightUpdate = now
+    end
 
-    -- Use Region3 to get enemies in radius
+    -- Use Region3 with optimized size and limits
     local playerPos = rootPart.Position
     local region = Region3.new(
         playerPos - Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius),
         playerPos + Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius)
     )
     
-    -- Get parts in region
-    enemiesCache = {}
-    local parts = workspace:FindPartsInRegion3(region, nil, 100)
+    -- Efficient parts query with limit
+    local parts = workspace:FindPartsInRegion3WithIgnoreList(
+        region, 
+        {character}, -- ignore player's character
+        maxPartsPerQuery
+    )
+    
+    -- Clean old cache periodically
+    if now - lastCacheCleanup >= enemyCacheCleanupInterval then
+        enemiesCache = {}
+        lastCacheCleanup = now
+    end
+    
+    -- Process parts efficiently
     for _, part in ipairs(parts) do
-        -- Check if part belongs to an enemy
-        local model = part:FindFirstAncestorOfClass("Model")
-        if model and model.Parent == enemiesFolder then
-            -- Double check exact distance (since Region3 is a cube)
+        -- Quick parent check before expensive operations
+        local parent = part.Parent
+        if parent and parent.Parent == enemiesFolder then
             local dsq = sqrDist(part.Position, playerPos)
             if dsq <= savedSettings.radiusSq then
-                enemiesCache[model] = part
+                enemiesCache[parent] = part
             end
         end
     end
@@ -231,26 +276,41 @@ end
 
 local function updateHighlights()
     if not rootPart then return end
+    
+    -- Get current position once
+    local currentPos = rootPart.Position
+    local currentRadiusSq = savedSettings.radiusSq
+    
+    -- Use a temporary table for tracking stale highlights
+    local toRemove = {}
     for enemy, box in pairs(highlightedEnemies) do
         if not enemiesCache[enemy] or not box.Parent then
-            if box then releaseSelectionBox(box) end
-            highlightedEnemies[enemy] = nil
+            toRemove[enemy] = box
         end
     end
+    
+    -- Batch remove stale highlights
+    for enemy, box in pairs(toRemove) do
+        releaseSelectionBox(box)
+        highlightedEnemies[enemy] = nil
+    end
 
+    -- Only process enemies within radius and respect maxHighlights
+    local activeHighlights = 0
     for model, part in pairs(enemiesCache) do
-        local dsq = sqrDist(part.Position, rootPart.Position)
-        if dsq <= savedSettings.radiusSq then
-            if not highlightedEnemies[model] then
+        if activeHighlights >= maxHighlights then break end
+        
+        -- Skip if already highlighted
+        if highlightedEnemies[model] then
+            activeHighlights = activeHighlights + 1
+        else
+            local dsq = sqrDist(part.Position, currentPos)
+            if dsq <= currentRadiusSq then
                 local box = getSelectionBox()
                 box.Adornee = part
                 box.Parent = part
                 highlightedEnemies[model] = box
-            end
-        else
-            if highlightedEnemies[model] then
-                releaseSelectionBox(highlightedEnemies[model])
-                highlightedEnemies[model] = nil
+                activeHighlights = activeHighlights + 1
             end
         end
     end
@@ -412,6 +472,40 @@ titleAccent.BackgroundColor3 = Color3.fromRGB(0,170,255)
 titleAccent.BorderSizePixel = 0
 local accentCorner = Instance.new("UICorner", titleAccent)
 accentCorner.CornerRadius = UDim.new(0,4)
+
+-- Create show radius toggle
+local showRadiusToggle = Instance.new("TextButton")
+showRadiusToggle.Size = UDim2.new(0,80,0,28)
+showRadiusToggle.Position = UDim2.new(0,180,0,128)
+showRadiusToggle.Text = "Show Radius"
+showRadiusToggle.BackgroundColor3 = buttonHoverProps.normal
+showRadiusToggle.TextColor3 = buttonHoverProps.text
+showRadiusToggle.Font = Enum.Font.GothamBold
+showRadiusToggle.TextSize = 12
+showRadiusToggle.AutoButtonColor = false
+showRadiusToggle.Parent = mainFrame
+local radiusCorner = Instance.new("UICorner", showRadiusToggle)
+radiusCorner.CornerRadius = UDim.new(0,12)
+local radiusStroke = Instance.new("UIStroke", showRadiusToggle)
+radiusStroke.Color = Color3.fromRGB(20,60,95)
+radiusStroke.Transparency = 0.7
+radiusStroke.Thickness = 1
+
+local showingRadius = false
+showRadiusToggle.MouseButton1Click:Connect(function()
+    showingRadius = not showingRadius
+    if showingRadius then
+        createRadiusIndicator()
+        showRadiusToggle.BackgroundColor3 = Color3.fromRGB(0,100,170)
+    else
+        if radiusIndicator then
+            radiusIndicator:Destroy()
+            radiusIndicator = nil
+        end
+        showRadiusToggle.BackgroundColor3 = buttonHoverProps.normal
+    end
+end)
+applyHover(showRadiusToggle)
 
 local titleText = Instance.new("TextLabel")
 titleText.Size = UDim2.new(1,-68,1,0)
@@ -650,6 +744,12 @@ function cleanup()
     clearHighlights()
     enemiesCache = {}
     currentAttackFunction = nil
+    
+    -- Clean up radius indicator
+    if radiusIndicator then
+        radiusIndicator:Destroy()
+        radiusIndicator = nil
+    end
 
     -- destroy GUI if present
     if ScreenGui and ScreenGui.Parent then
