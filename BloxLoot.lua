@@ -9,7 +9,7 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 repeat task.wait() until player
 
---== GUARD CLAUSE: PREVENT DUPLICATES ==
+--== GUARD CLAUSE: PREVENT DUPLICATES & CLEANUP ==
 local PlayerGui = player:WaitForChild("PlayerGui")
 local GUI_NAME = "AutoAttackGui"
 
@@ -17,20 +17,21 @@ local existingGui = PlayerGui:FindFirstChild(GUI_NAME)
 if existingGui then
 	warn("[AutoAttack Guard] Found existing instance of the script/GUI.")
     
-    -- Attempt to destroy the parent object (which is often the old script container)
+    -- Attempt to destroy the parent object (which is often the old script instance)
     local oldScript = existingGui.Parent
+    
+    -- **NIL CHECK ADDED HERE**
     if oldScript and oldScript:IsA("LocalScript") then
         warn("[AutoAttack Guard] Destroying old LocalScript instance.")
         oldScript:Destroy()
     else
-        -- If the parent wasn't the script, destroy the GUI directly.
-        -- This relies on the old script having a self-destruct mechanism
+        -- If parent is not the script, destroy the GUI directly for cleanup.
         existingGui:Destroy()
     end
     
 	task.wait(0.1) 
 end
---======================================
+--================================================
 
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
@@ -68,12 +69,12 @@ local function findLatestTool()
 			end
 		end
 	end
-
 	return newestTool
 end
 
 local function getAttackFunction()
 	local tool = findLatestTool()
+    -- **NIL CHECK**
 	if not tool then
 		warn("[AutoAttack] No tool found beginning with " .. baseToolPrefix)
 		return nil
@@ -84,6 +85,7 @@ local function getAttackFunction()
 	end
 
 	local functionsFolder = tool:FindFirstChild("Functions")
+    -- **NIL CHECK**
 	local attackFunction = functionsFolder and functionsFolder:FindFirstChild("Attack")
 
 	if attackFunction then
@@ -104,7 +106,7 @@ task.spawn(function()
 		if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
 			currentAttackFunction = getAttackFunction()
 		end
-	end)
+	end
 
 	actorsFolder.ChildAdded:Connect(function(child)
 		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
@@ -121,6 +123,7 @@ task.spawn(function()
 	end)
 
 	while true do
+        -- **NIL CHECK**
 		if not currentAttackFunction or not currentAttackFunction.Parent then
 			refreshTool()
 		end
@@ -138,12 +141,14 @@ end
 --== ENEMY DETECTION ==
 local function updateEnemies()
 	local enemyFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Enemies")
+    -- **NIL CHECK**
 	if not enemyFolder or not rootPart then return end
 
 	local newCache = {}
 	for _, model in pairs(enemyFolder:GetChildren()) do
 		if model:IsA("Model") and model:FindFirstChild("ActorId") and model:FindFirstChild("Humanoid") then
 			local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+            -- **NIL CHECK**
 			if part then
 				-- Simple logic: Use .Magnitude
 				local distance = (part.Position - rootPart.Position).Magnitude
@@ -159,14 +164,18 @@ end
 --== ENEMY HIGHLIGHTS ==
 local function clearHighlights()
 	for _, box in pairs(highlightedEnemies) do
+        -- **NIL CHECK**
 		if box and box.Parent then box:Destroy() end
 	end
 	highlightedEnemies = {}
 end
 
 local function updateHighlights()
+    -- **NIL CHECK**
 	if not rootPart then return end
+    
 	for enemy, box in pairs(highlightedEnemies) do
+        -- **NIL CHECK**
 		if not enemiesCache[enemy] or not box.Parent then
 			if box then box:Destroy() end
 			highlightedEnemies[enemy] = nil
@@ -174,11 +183,17 @@ local function updateHighlights()
 	end
 
 	for model, part in pairs(enemiesCache) do
+        -- **NIL CHECK**
+        if not part then continue end 
+        
 		-- Simple logic: Use .Magnitude
 		local distance = (part.Position - rootPart.Position).Magnitude
 		if distance <= savedSettings.radius then
 			if not highlightedEnemies[model] then
 				local box = Instance.new("SelectionBox")
+                -- **NIL CHECK**
+				if not part then continue end
+                
 				box.Adornee = part
 				box.LineThickness = 0.05
 				box.Color3 = Color3.fromRGB(0,170,255)
@@ -207,7 +222,8 @@ end)
 --== CHARACTER HANDLING ==
 local function onCharacterAdded(char)
 	character = char
-	rootPart = character:WaitForChild("HumanoidRootPart")
+    -- **NIL CHECK**
+	rootPart = character and character:WaitForChild("HumanoidRootPart")
 	clearHighlights()
 	
 	savedSettings.wasAttacking = savedSettings.attacking
@@ -218,6 +234,7 @@ local function onCharacterAdded(char)
 	until currentAttackFunction
 
 	if savedSettings.wasAttacking then
+        -- **NIL CHECK**
 		savedSettings.attacking = true
 		if toggleButton then
 			toggleButton.Text = "Stop"
@@ -244,6 +261,7 @@ task.spawn(function()
 	while true do
 		if savedSettings.attacking then
 			local attackFunc = getCurrentAttackFunction()
+            -- **CRITICAL NIL CHECK**
 			if not attackFunc or not rootPart then
 				task.wait(0.1)
 				continue
@@ -254,19 +272,26 @@ task.spawn(function()
 			if next(enemiesCache) then
 				local attackTable = {}
 				for model, part in pairs(enemiesCache) do
+                    -- **NIL CHECK**
+                    if not part then continue end
+                    
 					local actorId = model:FindFirstChild("ActorId")
-					if actorId then
-						-- Simple logic: Use .Magnitude
-						local distance = (part.Position - rootPart.Position).Magnitude
-						if distance <= savedSettings.radius then
-							attackTable[actorId.Value] = part
-						end
+                    -- **NIL CHECK**
+                    if not actorId then continue end
+                    
+					-- Simple logic: Use .Magnitude
+					local distance = (part.Position - rootPart.Position).Magnitude
+					if distance <= savedSettings.radius then
+						attackTable[actorId.Value] = part
 					end
 				end
 
 				if next(attackTable) then
 					local success, err = pcall(function()
-						attackFunc:InvokeServer(attackTable)
+                        -- **NIL CHECK**
+                        if attackFunc then 
+						    attackFunc:InvokeServer(attackTable)
+                        end
 					end)
 					if not success then
 						warn("[AutoAttack] InvokeServer failed: " .. tostring(err))
@@ -292,7 +317,11 @@ ScreenGui.Parent = PlayerGui
 local function tweenInstance(obj, props, time)
 	time = time or 0.16
 	local info = TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	local success, tween = pcall(function() return TweenService:Create(obj, info, props) end)
+    -- **NIL CHECK**
+	local success, tween = pcall(function() 
+        if obj then return TweenService:Create(obj, info, props) end
+        return nil, nil
+    end)
 	if success and tween then tween:Play() end
 end
 
@@ -304,7 +333,9 @@ local buttonHoverProps = {
 }
 
 local function applyHover(btn, opts)
+    -- **NIL CHECK**
 	if not btn then return end
+    
 	btn.MouseEnter:Connect(function()
 		local bColor = (opts and opts.danger) and buttonHoverProps.danger or buttonHoverProps.brighten
 		tweenInstance(btn, {BackgroundColor3 = bColor}, 0.12)
@@ -331,9 +362,9 @@ local mainCorner = Instance.new("UICorner", mainFrame)
 mainCorner.CornerRadius = UDim.new(0,14)
 
 local mainStroke = Instance.new("UIStroke", mainFrame)
-stroke.Color = Color3.fromRGB(30,50,70)
-stroke.Transparency = 0.6
-stroke.Thickness = 1
+mainStroke.Color = Color3.fromRGB(30,50,70)
+mainStroke.Transparency = 0.6
+mainStroke.Thickness = 1
 
 local mainGradient = Instance.new("UIGradient", mainFrame)
 mainGradient.Color = ColorSequence.new{
@@ -384,9 +415,9 @@ closeButton.Parent = titleBar
 local closeCorner = Instance.new("UICorner", closeButton)
 closeCorner.CornerRadius = UDim.new(0,10)
 local closeStroke = Instance.new("UIStroke", closeButton)
-stroke.Color = Color3.fromRGB(22,60,90)
-stroke.Transparency = 0.7
-stroke.Thickness = 1
+closeStroke.Color = Color3.fromRGB(22,60,90)
+closeStroke.Transparency = 0.7
+closeStroke.Thickness = 1
 
 applyHover(closeButton, {danger = false})
 closeButton.MouseButton1Click:Connect(function()
@@ -397,7 +428,10 @@ closeButton.MouseButton1Click:Connect(function()
 	clearHighlights()
 	
 	-- 3. Destroy the entire GUI element (and all children)
-	ScreenGui:Destroy()
+	-- **NIL CHECK**
+    if ScreenGui then
+	    ScreenGui:Destroy()
+    end
 	
 	-- 4. Terminate the script (THE MOST RELIABLE METHOD)
 	script:Destroy()
@@ -414,7 +448,10 @@ local function createLabel(text,pos)
 	lbl.Font = Enum.Font.Gotham
 	lbl.TextSize = 14
 	lbl.TextXAlignment = Enum.TextXAlignment.Left
-	lbl.Parent = mainFrame
+    -- **NIL CHECK**
+    if mainFrame then
+	    lbl.Parent = mainFrame
+    end
 	return lbl
 end
 
@@ -429,7 +466,10 @@ local function createBox(default,pos)
 	box.Font = Enum.Font.Gotham
 	box.TextSize = 16
 	box.TextXAlignment = Enum.TextXAlignment.Center
-	box.Parent = mainFrame
+    -- **NIL CHECK**
+    if mainFrame then
+	    box.Parent = mainFrame
+    end
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0,12)
 	corner.Parent = box
@@ -451,7 +491,10 @@ local function createApply(pos,callback)
 	btn.Font = Enum.Font.GothamBold
 	btn.TextSize = 14
 	btn.AutoButtonColor = false
-	btn.Parent = mainFrame
+    -- **NIL CHECK**
+    if mainFrame then
+	    btn.Parent = mainFrame
+    end
 	local corner = Instance.new("UICorner")
 	corner.CornerRadius = UDim.new(0,12)
 	corner.Parent = btn
@@ -469,7 +512,10 @@ createApply(UDim2.new(0,180,0,48), function()
 	if val and val > 0 then
 		savedSettings.radius = val
 	else
-		radiusBox.Text = tostring(savedSettings.radius)
+		-- **NIL CHECK**
+        if radiusBox then
+		    radiusBox.Text = tostring(savedSettings.radius)
+        end
 	end
 end)
 
@@ -478,7 +524,10 @@ createApply(UDim2.new(0,180,0,88), function()
 	if val and val > 0 then
 		savedSettings.attackInterval = val
 	else
-		intervalBox.Text = tostring(savedSettings.attackInterval)
+        -- **NIL CHECK**
+        if intervalBox then
+		    intervalBox.Text = tostring(savedSettings.attackInterval)
+        end
 	end
 end)
 
@@ -499,13 +548,16 @@ toggleCorner.Parent = toggleButton
 
 toggleButton.MouseButton1Click:Connect(function()
 	savedSettings.attacking = not savedSettings.attacking
-	if savedSettings.attacking then
-		toggleButton.Text = "Stop"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(170,0,0)
-	else
-		toggleButton.Text = "Start"
-		toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
-	end
+    -- **NIL CHECK**
+	if toggleButton then
+        if savedSettings.attacking then
+            toggleButton.Text = "Stop"
+            toggleButton.BackgroundColor3 = Color3.fromRGB(170,0,0)
+        else
+            toggleButton.Text = "Start"
+            toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
+        end
+    end
 end)
 applyHover(toggleButton)
 
@@ -525,15 +577,21 @@ miniCorner.CornerRadius = UDim.new(0,12)
 miniCorner.Parent = miniToggle
 
 miniToggle.MouseButton1Click:Connect(function()
-	mainFrame.Visible = not mainFrame.Visible
-	miniToggle.Text = mainFrame.Visible and "<<" or ">>"
+    -- **NIL CHECK**
+    if mainFrame and miniToggle then
+	    mainFrame.Visible = not mainFrame.Visible
+	    miniToggle.Text = mainFrame.Visible and "<<" or ">>"
+    end
 end)
 applyHover(miniToggle)
 
 -- F1 HOTKEY
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if not gameProcessed and input.KeyCode == Enum.KeyCode.F1 then
-		mainFrame.Visible = not mainFrame.Visible
-		miniToggle.Text = mainFrame.Visible and "<<" or ">>"
+        -- **NIL CHECK**
+        if mainFrame and miniToggle then
+		    mainFrame.Visible = not mainFrame.Visible
+		    miniToggle.Text = mainFrame.Visible and "<<" or ">>"
+        end
 	end
 end)
