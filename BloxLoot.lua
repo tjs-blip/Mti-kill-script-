@@ -9,10 +9,33 @@ local TweenService = game:GetService("TweenService")
 local player = Players.LocalPlayer
 repeat task.wait() until player
 
+--== GUARD CLAUSE: PREVENT DUPLICATES ==
+local PlayerGui = player:WaitForChild("PlayerGui")
+local GUI_NAME = "AutoAttackGui"
+
+local existingGui = PlayerGui:FindFirstChild(GUI_NAME)
+if existingGui then
+	warn("[AutoAttack Guard] Found existing instance of the script/GUI.")
+    
+    -- Attempt to destroy the parent object (which is often the old script container)
+    local oldScript = existingGui.Parent
+    if oldScript and oldScript:IsA("LocalScript") then
+        warn("[AutoAttack Guard] Destroying old LocalScript instance.")
+        oldScript:Destroy()
+    else
+        -- If the parent wasn't the script, destroy the GUI directly.
+        -- This relies on the old script having a self-destruct mechanism
+        existingGui:Destroy()
+    end
+    
+	task.wait(0.1) 
+end
+--======================================
+
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
-	radius = 100,
-	attackInterval = 0.1,
+	radius = 20,
+	attackInterval = 0.5,
 	attacking = false,
 	wasAttacking = false
 }
@@ -81,7 +104,7 @@ task.spawn(function()
 		if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
 			currentAttackFunction = getAttackFunction()
 		end
-	end
+	end)
 
 	actorsFolder.ChildAdded:Connect(function(child)
 		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
@@ -258,12 +281,12 @@ end)
 
 --== MODERN GUI ==
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "AutoAttackGui"
+ScreenGui.Name = GUI_NAME 
 ScreenGui.DisplayOrder = 99999
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
 ScreenGui.IgnoreGuiInset = true
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = player:WaitForChild("PlayerGui")
+ScreenGui.Parent = PlayerGui
 
 -- New: small tween helper + button hover styling
 local function tweenInstance(obj, props, time)
@@ -294,7 +317,6 @@ end
 -- MAIN FRAME (modern/stylish)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "Main"
--- HEIGHT MODIFIED BACK TO 180
 mainFrame.Size = UDim2.new(0,280,0,180) 
 mainFrame.Position = UDim2.new(0.05,0,0.25,0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12,16,22)
@@ -309,9 +331,9 @@ local mainCorner = Instance.new("UICorner", mainFrame)
 mainCorner.CornerRadius = UDim.new(0,14)
 
 local mainStroke = Instance.new("UIStroke", mainFrame)
-mainStroke.Color = Color3.fromRGB(30,50,70)
-mainStroke.Transparency = 0.6
-mainStroke.Thickness = 1
+stroke.Color = Color3.fromRGB(30,50,70)
+stroke.Transparency = 0.6
+stroke.Thickness = 1
 
 local mainGradient = Instance.new("UIGradient", mainFrame)
 mainGradient.Color = ColorSequence.new{
@@ -362,14 +384,23 @@ closeButton.Parent = titleBar
 local closeCorner = Instance.new("UICorner", closeButton)
 closeCorner.CornerRadius = UDim.new(0,10)
 local closeStroke = Instance.new("UIStroke", closeButton)
-closeStroke.Color = Color3.fromRGB(22,60,90)
-closeStroke.Transparency = 0.7
-closeStroke.Thickness = 1
+stroke.Color = Color3.fromRGB(22,60,90)
+stroke.Transparency = 0.7
+stroke.Thickness = 1
 
 applyHover(closeButton, {danger = false})
 closeButton.MouseButton1Click:Connect(function()
+	-- 1. Stop attacking logic (if running)
+	savedSettings.attacking = false
+	
+	-- 2. Clear all highlights in the workspace
+	clearHighlights()
+	
+	-- 3. Destroy the entire GUI element (and all children)
 	ScreenGui:Destroy()
-	if radiusIndicator then radiusIndicator:Destroy() end
+	
+	-- 4. Terminate the script (THE MOST RELIABLE METHOD)
+	script:Destroy()
 end)
 
 -- LABELS & TEXTBOXES
@@ -451,10 +482,10 @@ createApply(UDim2.new(0,180,0,88), function()
 	end
 end)
 
--- ATTACK TOGGLE BUTTON (Position adjusted to sit higher in the frame)
+-- ATTACK TOGGLE BUTTON
 toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0,80,0,28)
-toggleButton.Position = UDim2.new(0.5,-40,0,138) -- Positioned lower to match new height
+toggleButton.Position = UDim2.new(0.5,-40,0,138) 
 toggleButton.Text = "Start"
 toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
 toggleButton.TextColor3 = Color3.fromRGB(0,170,255)
