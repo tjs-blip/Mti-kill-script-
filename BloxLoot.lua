@@ -4,7 +4,7 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
+local TweenService = game:GetService("TweenService") -- Added for Advanced GUI
 
 local player = Players.LocalPlayer
 repeat task.wait() until player
@@ -12,7 +12,6 @@ repeat task.wait() until player
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
 	radius = 20,
-	radiusSq = 20 * 20, -- NEW: Added squared radius for optimization
 	attackInterval = 0.5,
 	attacking = false,
 	wasAttacking = false
@@ -27,23 +26,6 @@ local toggleButton
 local currentAttackFunction
 local cachedAttackFunctions = {}
 local radiusIndicator
-
--- Get enemies folder reference
-local enemiesFolder
-task.spawn(function()
-	local runtime = Workspace:FindFirstChild("Runtime") or Workspace:WaitForChild("Runtime")
-	if runtime then
-		enemiesFolder = runtime:FindFirstChild("Enemies") or runtime:WaitForChild("Enemies")
-	end
-end)
-
--- NEW: connection tracking and lifecycle flag
-local connections = {}
-local function track(conn)
-	if conn then table.insert(connections, conn) end
-	return conn
-end
-local scriptAlive = true
 
 --== STRICT AUTO TOOL DETECTION ==
 local baseToolPrefix = "Tool_Character_1160945383_"
@@ -66,22 +48,6 @@ local function findLatestTool()
 
 	return newestTool
 end
-
--- fast squared-distance helper (avoids Magnitude / sqrt)
-local function sqrDist(a, b)
-	local dx = a.X - b.X
-	local dy = a.Y - b.Y
-	local dz = a.Z - b.Z
-	return dx*dx + dy*dy + dz*dz
-end
-
---[[ 
-	REMOVED UNUSED FUNCTIONS: 
-	- createHighlight
-	- getSelectionBox
-	- releaseSelectionBox
-	(These were related to an object pool that wasn't implemented)
-]]
 
 local function getAttackFunction()
 	local tool = findLatestTool()
@@ -106,50 +72,34 @@ local function getAttackFunction()
 	end
 end
 
-local highlightThrottle = 0.05
-local highlightTimer = 0
-RunService.RenderStepped:Connect(function(dt)
-	highlightTimer += dt
-	if highlightTimer >= highlightThrottle then
-		updateHighlights()
-		highlightTimer = 0
-	end
-end)
-
--- Auto-refresh when new tools appear/disappear (store child connections and loop guard)
+-- Auto-refresh when new tools appear/disappear (Simple Logic)
 task.spawn(function()
 	local actorsFolder = ReplicatedStorage:WaitForChild("Runtime"):WaitForChild("Actors")
 
-	local childAddedConn, childRemovedConn
-	childAddedConn = actorsFolder.ChildAdded:Connect(function(child)
-		if not scriptAlive then return end
-		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
-			task.wait(0.2)
-			local newTool = findLatestTool()
-			if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
-				currentAttackFunction = getAttackFunction()
-			end
+	local function refreshTool()
+		local newTool = findLatestTool()
+		if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
+			currentAttackFunction = getAttackFunction()
 		end
-	end)
-	childRemovedConn = actorsFolder.ChildRemoved:Connect(function(child)
-		if not scriptAlive then return end
+	end
+
+	actorsFolder.ChildAdded:Connect(function(child)
 		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
 			task.wait(0.2)
-			local newTool = findLatestTool()
-			if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
-				currentAttackFunction = getAttackFunction()
-			end
+			refreshTool()
 		end
 	end)
 
-	track(childAddedConn); track(childRemovedConn)
+	actorsFolder.ChildRemoved:Connect(function(child)
+		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
+			task.wait(0.2)
+			refreshTool()
+		end
+	end)
 
-	while scriptAlive do
+	while true do
 		if not currentAttackFunction or not currentAttackFunction.Parent then
-			local newTool = findLatestTool()
-			if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
-				currentAttackFunction = getAttackFunction()
-			end
+			refreshTool()
 		end
 		task.wait(2)
 	end
@@ -162,7 +112,7 @@ local function getCurrentAttackFunction()
 	return currentAttackFunction
 end
 
--- Create radius visualization part
+-- Create radius visualization part (From Advanced GUI)
 local function createRadiusIndicator()
 	if radiusIndicator then 
 		radiusIndicator:Destroy()
@@ -203,9 +153,9 @@ local function updateEnemies()
 		if model:IsA("Model") and model:FindFirstChild("ActorId") and model:FindFirstChild("Humanoid") then
 			local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
 			if part then
-				-- OPTIMIZED: Use squared distance
-				local distanceSq = sqrDist(part.Position, rootPart.Position)
-				if distanceSq <= savedSettings.radiusSq then
+				-- Simple logic: Use .Magnitude
+				local distance = (part.Position - rootPart.Position).Magnitude
+				if distance <= savedSettings.radius then
 					newCache[model] = part
 				end
 			end
@@ -232,9 +182,9 @@ local function updateHighlights()
 	end
 
 	for model, part in pairs(enemiesCache) do
-		-- OPTIMIZED: Use squared distance
-		local distanceSq = sqrDist(part.Position, rootPart.Position)
-		if distanceSq <= savedSettings.radiusSq then
+		-- Simple logic: Use .Magnitude
+		local distance = (part.Position - rootPart.Position).Magnitude
+		if distance <= savedSettings.radius then
 			if not highlightedEnemies[model] then
 				local box = Instance.new("SelectionBox")
 				box.Adornee = part
@@ -252,13 +202,23 @@ local function updateHighlights()
 	end
 end
 
+local highlightThrottle = 0.05
+local highlightTimer = 0
+RunService.RenderStepped:Connect(function(dt)
+	highlightTimer += dt
+	if highlightTimer >= highlightThrottle then
+		updateHighlights()
+		highlightTimer = 0
+	end
+end)
+
 --== CHARACTER HANDLING ==
 local function onCharacterAdded(char)
 	character = char
 	rootPart = character:WaitForChild("HumanoidRootPart")
 	clearHighlights()
 
-	-- Update radius indicator
+	-- Update radius indicator (From Advanced GUI)
 	if radiusIndicator then
 		radiusIndicator.Position = rootPart.Position
 		radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
@@ -280,15 +240,14 @@ local function onCharacterAdded(char)
 	end
 end
 
--- Track Character connections
-local charAddedConn = track(player.CharacterAdded:Connect(onCharacterAdded))
-local charRemovingConn = track(player.CharacterRemoving:Connect(function()
-	if not scriptAlive then return end
+-- Simple logic: Direct connections
+player.CharacterAdded:Connect(onCharacterAdded)
+player.CharacterRemoving:Connect(function()
 	clearHighlights()
 	character = nil
 	rootPart = nil
 	enemiesCache = {}
-end))
+end)
 
 if player.Character then
 	onCharacterAdded(player.Character)
@@ -311,9 +270,9 @@ task.spawn(function()
 				for model, part in pairs(enemiesCache) do
 					local actorId = model:FindFirstChild("ActorId")
 					if actorId then
-						-- OPTIMIZED: Use squared distance
-						local distanceSq = sqrDist(part.Position, rootPart.Position)
-						if distanceSq <= savedSettings.radiusSq then
+						-- Simple logic: Use .Magnitude
+						local distance = (part.Position - rootPart.Position).Magnitude
+						if distance <= savedSettings.radius then
 							attackTable[actorId.Value] = part
 						end
 					end
@@ -329,22 +288,12 @@ task.spawn(function()
 					end
 				end
 			end
-			
-			--[[ 
-				REMOVED: Redundant attack block was here.
-				The code now only calls InvokeServer once per interval.
-			]]
-			
-		else
-			task.wait(0.1)
 		end
-		
-		-- Wait for the interval *after* the attack (or after the check if not attacking)
 		task.wait(savedSettings.attackInterval)
 	end
 end)
 
---== MODERN GUI ==
+--== MODERN GUI (From Advanced Script) ==
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AutoAttackGui"
 ScreenGui.DisplayOrder = 99999
@@ -370,16 +319,13 @@ local buttonHoverProps = {
 
 local function applyHover(btn, opts)
 	if not btn then return end
-	local enterConn = btn.MouseEnter:Connect(function()
-		if not scriptAlive then return end
+	btn.MouseEnter:Connect(function()
 		local bColor = (opts and opts.danger) and buttonHoverProps.danger or buttonHoverProps.brighten
 		tweenInstance(btn, {BackgroundColor3 = bColor}, 0.12)
 	end)
-	local leaveConn = btn.MouseLeave:Connect(function()
-		if not scriptAlive then return end
+	btn.MouseLeave:Connect(function()
 		tweenInstance(btn, {BackgroundColor3 = opts and (opts.danger and buttonHoverProps.danger or buttonHoverProps.normal) or buttonHoverProps.normal}, 0.12)
 	end)
-	track(enterConn); track(leaveConn)
 end
 
 -- MAIN FRAME (modern/stylish)
@@ -489,10 +435,9 @@ closeStroke.Transparency = 0.7
 closeStroke.Thickness = 1
 
 applyHover(closeButton, {danger = false})
--- change to call cleanup instead of direct Destroy
+-- MODIFIED: Change to ScreenGui:Destroy() to match simple logic
 closeButton.MouseButton1Click:Connect(function()
-	if not scriptAlive then return end
-	if cleanup then cleanup() end
+	ScreenGui:Destroy()
 end)
 
 -- LABELS & TEXTBOXES
@@ -560,7 +505,7 @@ createApply(UDim2.new(0,180,0,48), function()
 	local val = tonumber(radiusBox.Text)
 	if val and val > 0 then
 		savedSettings.radius = val
-		savedSettings.radiusSq = val * val -- UPDATED: Also update squared radius
+		-- MODIFIED: No radiusSq update
 		if radiusIndicator and rootPart then
 			radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
 			radiusIndicator.Position = rootPart.Position
@@ -628,23 +573,20 @@ end)
 applyHover(miniToggle)
 
 -- F1 HOTKEY
-local inputBeganConn = track(UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if not scriptAlive then return end
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if not gameProcessed and input.KeyCode == Enum.KeyCode.F1 then
 		mainFrame.Visible = not mainFrame.Visible
 		miniToggle.Text = mainFrame.Visible and "<<" or ">>"
 	end
-end))
+end)
 
--- New: simple drag handling to replace deprecated Draggable property
+-- New: simple drag handling (From Advanced GUI)
 local dragging = false
 local dragStart = Vector2.new()
 local startPos = mainFrame.Position
 local dragInput
 
--- track titleBar Input connections
-local titleInputBegan = titleBar.InputBegan:Connect(function(input)
-	if not scriptAlive then return end
+titleBar.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		dragging = true
 		dragStart = input.Position
@@ -656,14 +598,12 @@ local titleInputBegan = titleBar.InputBegan:Connect(function(input)
 		end)
 	end
 end)
-local titleInputChanged = titleBar.InputChanged:Connect(function(input)
-	if not scriptAlive then return end
+titleBar.InputChanged:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
 		dragInput = input
 	end
 end)
-local userInputChanged = UserInputService.InputChanged:Connect(function(input)
-	if not scriptAlive then return end
+UserInputService.InputChanged:Connect(function(input)
 	if dragging and input == dragInput then
 		local delta = input.Position - dragStart
 		mainFrame.Position = UDim2.new(
@@ -675,41 +615,4 @@ local userInputChanged = UserInputService.InputChanged:Connect(function(input)
 	end
 end)
 
-track(titleInputBegan); track(titleInputChanged); track(userInputChanged)
-
--- NEW: cleanup function to gracefully stop loops and disconnect events
-function cleanup()
-	if not scriptAlive then return end
-	scriptAlive = false
-	savedSettings.attacking = false
-
-	-- disconnect all tracked connections
-	for _, conn in ipairs(connections) do
-		if conn and type(conn.Disconnect) == "function" then
-			pcall(function() conn:Disconnect() end)
-		end
-	end
-	connections = {}
-
-	-- clear visuals & temp cache only (keep master list)
-	clearHighlights()
-	enemiesCache = {}
-	currentAttackFunction = nil
-	
-	-- Clean up radius indicator
-	if radiusIndicator then
-		radiusIndicator:Destroy()
-		radiusIndicator = nil
-	end
-
-	-- destroy GUI if present
-	if ScreenGui and ScreenGui.Parent then
-		pcall(function() ScreenGui:Destroy() end)
-	end
-end
-
--- ensure GUI cleanup if removed from parent externally
-local ancestryConn = ScreenGui.AncestryChanged:Connect(function()
-	if not ScreenGui.Parent then cleanup() end
-end)
-track(ancestryConn)
+-- REMOVED: All cleanup() and connection tracking logic
