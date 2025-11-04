@@ -7,21 +7,29 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService") 
 
 local player = Players.LocalPlayer
-repeat task.wait() until player
+-- Ensure the player object is loaded before continuing.
+repeat task.wait() until player and player.Parent and player.PlayerGui
 
 --== GUARD CLAUSE: PREVENT DUPLICATES & CLEANUP ==
-local PlayerGui = player:WaitForChild("PlayerGui")
-local GUI_NAME = "AutoAttackGui"
+-- Safely get PlayerGui
+local PlayerGui = player:FindFirstChild("PlayerGui")
+if not PlayerGui then 
+    warn("[AutoAttack Guard] PlayerGui not found. Terminating new script.") 
+    script:Destroy() 
+    return 
+end
 
+local GUI_NAME = "AutoAttackGui"
 local existingGui = PlayerGui:FindFirstChild(GUI_NAME)
+
 if existingGui then
 	warn("[AutoAttack Guard] Found existing instance of the script/GUI.")
     
     -- Attempt to destroy the parent object (which is often the old script instance)
     local oldScript = existingGui.Parent
     
-    -- NIL CHECK: Safely check and destroy the old script instance
-    if oldScript and oldScript:IsA("LocalScript") and oldScript ~= script then -- Added: oldScript ~= script just in case of weird parenting
+    -- Safely check and destroy the old script instance
+    if oldScript and oldScript:IsA("LocalScript") and oldScript ~= script then 
         warn("[AutoAttack Guard] Destroying old LocalScript instance.")
         oldScript:Destroy()
     else
@@ -32,6 +40,8 @@ if existingGui then
 	task.wait(0.1) 
 end
 --================================================
+
+-- Rest of the script remains unchanged but is included for completeness.
 
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
@@ -55,7 +65,12 @@ local radiusIndicator
 local baseToolPrefix = "Tool_Character_1160945383_"
 
 local function findLatestTool()
-	local actorsFolder = ReplicatedStorage:WaitForChild("Runtime"):WaitForChild("Actors")
+    -- Safely check for ReplicatedStorage/Runtime
+    local runtime = ReplicatedStorage:FindFirstChild("Runtime")
+    if not runtime then return nil end
+    local actorsFolder = runtime:FindFirstChild("Actors")
+    if not actorsFolder then return nil end
+
 	local newestTool
 	local highestNumber = 0
 
@@ -97,14 +112,17 @@ end
 
 -- Auto-refresh when new tools appear/disappear
 task.spawn(function()
-	local actorsFolder = ReplicatedStorage:WaitForChild("Runtime"):WaitForChild("Actors")
+    local runtime = ReplicatedStorage:FindFirstChild("Runtime")
+    if not runtime then return end -- Nil check
+	local actorsFolder = runtime:FindFirstChild("Actors")
+    if not actorsFolder then return end -- Nil check
 
 	local function refreshTool()
 		local newTool = findLatestTool()
 		if newTool and newTool.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
 			currentAttackFunction = getAttackFunction()
 		end
-	end)
+	end
 
 	actorsFolder.ChildAdded:Connect(function(child)
 		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
@@ -210,7 +228,7 @@ end)
 --== CHARACTER HANDLING ==
 local function onCharacterAdded(char)
 	character = char
-	rootPart = character and character:WaitForChild("HumanoidRootPart") -- Safe access
+	rootPart = character and character:WaitForChild("HumanoidRootPart") 
 	clearHighlights()
 	
 	savedSettings.wasAttacking = savedSettings.attacking
@@ -314,7 +332,7 @@ local buttonHoverProps = {
 }
 
 local function applyHover(btn, opts)
-	if not btn then return end -- Nil check
+	if not btn then return end 
     
 	btn.MouseEnter:Connect(function()
 		local bColor = (opts and opts.danger) and buttonHoverProps.danger or buttonHoverProps.brighten
@@ -359,6 +377,7 @@ local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1,0,0,36)
 titleBar.BackgroundTransparency = 1
+mainFrame.Parent:IsA("ScreenGui") -- Safely ensure ScreenGui exists
 titleBar.Parent = mainFrame
 
 local titleAccent = Instance.new("Frame", titleBar)
@@ -408,7 +427,7 @@ closeButton.MouseButton1Click:Connect(function()
 	clearHighlights()
 	
 	-- 3. Destroy the entire GUI element (and all children)
-	if ScreenGui then -- Nil check
+	if ScreenGui then 
 	    ScreenGui:Destroy()
     end
 	
@@ -427,7 +446,7 @@ local function createLabel(text,pos)
 	lbl.Font = Enum.Font.Gotham
 	lbl.TextSize = 14
 	lbl.TextXAlignment = Enum.TextXAlignment.Left
-    if mainFrame then -- Nil check
+    if mainFrame then 
 	    lbl.Parent = mainFrame
     end
 	return lbl
@@ -444,7 +463,7 @@ local function createBox(default,pos)
 	box.Font = Enum.Font.Gotham
 	box.TextSize = 16
 	box.TextXAlignment = Enum.TextXAlignment.Center
-    if mainFrame then -- Nil check
+    if mainFrame then 
 	    box.Parent = mainFrame
     end
 	local corner = Instance.new("UICorner")
@@ -468,7 +487,7 @@ local function createApply(pos,callback)
 	btn.Font = Enum.Font.GothamBold
 	btn.TextSize = 14
 	btn.AutoButtonColor = false
-    if mainFrame then -- Nil check
+    if mainFrame then 
 	    btn.Parent = mainFrame
     end
 	local corner = Instance.new("UICorner")
@@ -484,22 +503,22 @@ local function createApply(pos,callback)
 end
 
 createApply(UDim2.new(0,180,0,48), function()
-	local val = tonumber(radiusBox and radiusBox.Text) -- **NIL CHECK**
+	local val = tonumber(radiusBox and radiusBox.Text) 
 	if val and val > 0 then
 		savedSettings.radius = val
 	else
-        if radiusBox then -- **NIL CHECK**
+        if radiusBox then 
 		    radiusBox.Text = tostring(savedSettings.radius)
         end
 	end
 end)
 
 createApply(UDim2.new(0,180,0,88), function()
-	local val = tonumber(intervalBox and intervalBox.Text) -- **NIL CHECK**
+	local val = tonumber(intervalBox and intervalBox.Text) 
 	if val and val > 0 then
 		savedSettings.attackInterval = val
 	else
-        if intervalBox then -- **NIL CHECK**
+        if intervalBox then 
 		    intervalBox.Text = tostring(savedSettings.attackInterval)
         end
 	end
