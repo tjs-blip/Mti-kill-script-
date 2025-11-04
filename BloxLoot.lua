@@ -88,6 +88,15 @@ local function sqrDist(a, b)
     return dx*dx + dy*dy + dz*dz
 end
 
+local function createHighlight()
+    local highlight = Instance.new("Highlight")
+    highlight.FillTransparency = 0.7
+    highlight.OutlineTransparency = 0.2
+    highlight.FillColor = Color3.fromRGB(255, 0, 0)  -- Red fill for enemies
+    highlight.OutlineColor = Color3.fromRGB(0, 170, 255)  -- Blue outline
+    return highlight
+end
+
 local function getSelectionBox()
     local box = table.remove(selectionBoxPool)
     if box and box.Parent then
@@ -95,9 +104,7 @@ local function getSelectionBox()
         box.Parent = nil
     end
     if not box then
-        box = Instance.new("SelectionBox")
-        box.LineThickness = 0.05
-        box.Color3 = Color3.fromRGB(0,170,255)
+        box = createHighlight()  -- Use Highlight instead of SelectionBox
     end
     return box
 end
@@ -281,37 +288,35 @@ local function updateHighlights()
     local currentPos = rootPart.Position
     local currentRadiusSq = savedSettings.radiusSq
     
-    -- Use a temporary table for tracking stale highlights
-    local toRemove = {}
-    for enemy, box in pairs(highlightedEnemies) do
-        if not enemiesCache[enemy] or not box.Parent then
-            toRemove[enemy] = box
+    -- Clean up stale highlights
+    for enemy, highlight in pairs(highlightedEnemies) do
+        if not enemiesCache[enemy] then
+            if highlight then
+                releaseSelectionBox(highlight)
+            end
+            highlightedEnemies[enemy] = nil
         end
     end
-    
-    -- Batch remove stale highlights
-    for enemy, box in pairs(toRemove) do
-        releaseSelectionBox(box)
-        highlightedEnemies[enemy] = nil
-    end
 
-    -- Only process enemies within radius and respect maxHighlights
-    local activeHighlights = 0
+    -- Highlight all enemies in cache
     for model, part in pairs(enemiesCache) do
-        if activeHighlights >= maxHighlights then break end
-        
-        -- Skip if already highlighted
-        if highlightedEnemies[model] then
-            activeHighlights = activeHighlights + 1
-        else
-            local dsq = sqrDist(part.Position, currentPos)
-            if dsq <= currentRadiusSq then
-                local box = getSelectionBox()
-                box.Adornee = part
-                box.Parent = part
-                highlightedEnemies[model] = box
-                activeHighlights = activeHighlights + 1
+        if not highlightedEnemies[model] then
+            local highlight = getSelectionBox()
+            -- Apply highlight to the whole model instead of just the part
+            highlight.Adornee = model
+            highlight.Parent = model
+            highlightedEnemies[model] = highlight
+            
+            -- Make highlight more visible when attacking
+            if savedSettings.attacking then
+                highlight.FillTransparency = 0.5
+                highlight.OutlineTransparency = 0
             end
+        elseif savedSettings.attacking then
+            -- Update existing highlight visibility
+            local highlight = highlightedEnemies[model]
+            highlight.FillTransparency = 0.5
+            highlight.OutlineTransparency = 0
         end
     end
 end
@@ -364,10 +369,36 @@ task.spawn(function()
         if savedSettings.attacking then
             local attackFunc = getCurrentAttackFunction()
             if attackFunc then
-                updateEnemies() -- Update nearby enemies
+                -- Force update enemies every attack cycle
+                if rootPart and enemiesFolder then
+                    -- Use Region3 with optimized size and limits
+                    local playerPos = rootPart.Position
+                    local region = Region3.new(
+                        playerPos - Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius),
+                        playerPos + Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius)
+                    )
+                    
+                    -- Get parts in region
+                    local parts = workspace:FindPartsInRegion3WithIgnoreList(
+                        region, 
+                        {character}, 
+                        maxPartsPerQuery
+                    )
+                    
+                    -- Process parts efficiently
+                    for _, part in ipairs(parts) do
+                        local parent = part.Parent
+                        if parent and parent.Parent == enemiesFolder then
+                            local dsq = sqrDist(part.Position, playerPos)
+                            if dsq <= savedSettings.radiusSq then
+                                enemiesCache[parent] = part
+                            end
+                        end
+                    end
+                end
                 
                 local targets = {}
-                -- Use cached nearby enemies
+                -- Use all enemies in range
                 for model, part in pairs(enemiesCache) do
                     local actorId = model:FindFirstChild("ActorId")
                     if actorId then
