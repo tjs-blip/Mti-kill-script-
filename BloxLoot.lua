@@ -36,15 +36,10 @@ local maxHighlights = 32 -- cap how many selection boxes we keep alive
 local updateEnemiesInterval = 0.25 -- seconds between full enemy scans
 local lastEnemiesUpdate = 0
 
--- hardcoded enemy IDs
-local enemyIds = {
-    "1_1_1", "1_1_2", "1_1_3", "1_1_4", "1_1_5", "1_1_6", "1_1_7",
-    "1_2_1", "1_2_2", "1_2_3", "1_2_4", "1_2_5",
-    "1_3_1", "1_3_2", "1_3_3", "1_3_4",
-    "1_2_100", "1_2_101", "1_3_100"
-}
+-- hardcoded enemy refs with direct values
+local masterEnemyList = {}
 
--- set up static enemy tracking
+-- set up static enemy tracking (no searching)
 task.spawn(function()
     local runtime = Workspace:FindFirstChild("Runtime") or Workspace:WaitForChild("Runtime")
     if runtime then
@@ -54,31 +49,25 @@ task.spawn(function()
         if not enemiesFolder then
             enemiesFolder = runtime:WaitForChild("Enemies")
         end
+
+        -- Create fake actorId objects with hardcoded values
+        local attackTargets = {
+            "1_1_1", "1_1_2", "1_1_3", "1_1_4", "1_1_5", "1_1_6", "1_1_7",
+            "1_2_1", "1_2_2", "1_2_3", "1_2_4", "1_2_5",
+            "1_3_1", "1_3_2", "1_3_3", "1_3_4",
+            "1_2_100", "1_2_101", "1_3_100"
+        }
         
-        -- function to quickly find enemy by ID
-        local function getEnemyByActorId(id)
-            for _, model in ipairs(enemiesFolder:GetChildren()) do
-                local actorId = model:FindFirstChild("ActorId")
-                if actorId and actorId.Value == id then
-                    local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-                    if part then
-                        return {model = model, actorId = actorId, part = part}
-                    end
-                end
-            end
-            return nil
-        end
-        
-        -- just build the list once
-        masterEnemyList = {}
-        for _, id in ipairs(enemyIds) do
-            local enemy = getEnemyByActorId(id)
-            if enemy then
-                masterEnemyList[enemy.model] = {
-                    actorId = enemy.actorId,
-                    part = enemy.part
+        -- Create a dummy model entry for each target
+        for _, id in ipairs(attackTargets) do
+            local dummy = {Value = id} -- fake actorId object
+            masterEnemyList[dummy] = {
+                actorId = dummy,
+                part = {  -- fake part with position
+                    Position = Vector3.new(0,0,0),
+                    Parent = true -- always considered valid
                 }
-            end
+            }
         end
     end
 end)
@@ -326,39 +315,26 @@ if player.Character then
     onCharacterAdded(player.Character)
 end
 
---== AUTO ATTACK LOOP (RADIUS FILTERED) ==
--- Reuse attackTable to reduce allocations
-local attackTable = {}
+--== AUTO ATTACK LOOP (NO CHECKS) ==
 task.spawn(function()
     while scriptAlive do
         if savedSettings.attacking then
             local attackFunc = getCurrentAttackFunction()
-            if not attackFunc or not rootPart then
-                task.wait(0.1)
-            else
-                updateEnemies()
-
-                if next(enemiesCache) then
-                    -- clear reusable table
-                    for k in pairs(attackTable) do attackTable[k] = nil end
-
-                    for model, part in pairs(enemiesCache) do
-                        local data = masterEnemyList[model]
-                        if data and data.actorId then
-                            attackTable[data.actorId.Value] = part
-                        end
+            if attackFunc then
+                -- Just send all targets every time, no checks needed
+                local success, err = pcall(function()
+                    local targets = {}
+                    for ref, data in pairs(masterEnemyList) do
+                        targets[ref.Value] = data.part
                     end
-
-                    if next(attackTable) then
-                        local success, err = pcall(function()
-                            attackFunc:InvokeServer(attackTable)
-                        end)
-                        if not success then
-                            warn("[AutoAttack] InvokeServer failed: " .. tostring(err))
-                            currentAttackFunction = nil
-                        end
-                    end
+                    attackFunc:InvokeServer(targets)
+                end)
+                if not success then
+                    warn("[AutoAttack] InvokeServer failed: " .. tostring(err))
+                    currentAttackFunction = nil
                 end
+            else
+                task.wait(0.1)
             end
         end
         task.wait(savedSettings.attackInterval)
