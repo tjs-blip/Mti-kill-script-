@@ -36,43 +36,50 @@ local maxHighlights = 32 -- cap how many selection boxes we keep alive
 local updateEnemiesInterval = 0.25 -- seconds between full enemy scans
 local lastEnemiesUpdate = 0
 
--- single table holding all known enemies
-local masterEnemyList = {} -- {[model] = {actorId = id, part = primaryPart}}
+-- hardcoded enemy IDs
+local enemyIds = {
+    "1_1_1", "1_1_2", "1_1_3", "1_1_4", "1_1_5", "1_1_6", "1_1_7",
+    "1_2_1", "1_2_2", "1_2_3", "1_2_4", "1_2_5",
+    "1_3_1", "1_3_2", "1_3_3", "1_3_4",
+    "1_2_100", "1_2_101", "1_3_100"
+}
 
--- set up permanent enemy tracking
+-- set up static enemy tracking
 task.spawn(function()
     local runtime = Workspace:FindFirstChild("Runtime") or Workspace:WaitForChild("Runtime")
     if runtime then
         local enemiesFolder = runtime:FindFirstChild("Enemies") or runtime:WaitForChild("Enemies")
         
-        -- initial enemy population
-        for _, model in ipairs(enemiesFolder:GetChildren()) do
-            if model:IsA("Model") then
+        -- just wait once for the folder to load
+        if not enemiesFolder then
+            enemiesFolder = runtime:WaitForChild("Enemies")
+        end
+        
+        -- function to quickly find enemy by ID
+        local function getEnemyByActorId(id)
+            for _, model in ipairs(enemiesFolder:GetChildren()) do
                 local actorId = model:FindFirstChild("ActorId")
-                local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-                if actorId and part then
-                    masterEnemyList[model] = {
-                        actorId = actorId,
-                        part = part
-                    }
+                if actorId and actorId.Value == id then
+                    local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                    if part then
+                        return {model = model, actorId = actorId, part = part}
+                    end
                 end
+            end
+            return nil
+        end
+        
+        -- just build the list once
+        masterEnemyList = {}
+        for _, id in ipairs(enemyIds) do
+            local enemy = getEnemyByActorId(id)
+            if enemy then
+                masterEnemyList[enemy.model] = {
+                    actorId = enemy.actorId,
+                    part = enemy.part
+                }
             end
         end
-
-        -- track new enemies only (never remove)
-        enemiesFolder.ChildAdded:Connect(function(model)
-            if model:IsA("Model") then
-                local actorId = model:FindFirstChild("ActorId") or model:WaitForChild("ActorId")
-                local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:WaitForChild("HumanoidRootPart")
-                if actorId and part and not masterEnemyList[model] then
-                    masterEnemyList[model] = {
-                        actorId = actorId,
-                        part = part
-                    }
-                end
-            end
-        end)
-        -- No ChildRemoved handler - keep enemies permanently
     end
 end)
 
@@ -229,11 +236,12 @@ local function updateEnemies()
     if now - lastEnemiesUpdate < updateEnemiesInterval then return end
     lastEnemiesUpdate = now
 
-    -- populate enemiesCache with nearby enemies from master list
+    -- update cache with valid enemies from our fixed list
     enemiesCache = {}
+    local playerPos = rootPart.Position
     for model, data in pairs(masterEnemyList) do
-        if data.part then
-            local dsq = sqrDist(data.part.Position, rootPart.Position)
+        if data.part.Parent then -- quick parent check only
+            local dsq = sqrDist(data.part.Position, playerPos)
             if dsq <= savedSettings.radiusSq then
                 enemiesCache[model] = data.part
             end
