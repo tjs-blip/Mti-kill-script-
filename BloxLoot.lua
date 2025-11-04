@@ -25,7 +25,7 @@ local enemiesCache = {}
 local toggleButton
 local currentAttackFunction
 local cachedAttackFunctions = {}
-local radiusIndicator -- Retained as a variable, but its creation/use logic is removed
+local radiusIndicator -- Retained as a variable, but unused
 
 --== STRICT AUTO TOOL DETECTION ==
 local baseToolPrefix = "Tool_Character_1160945383_"
@@ -112,8 +112,6 @@ local function getCurrentAttackFunction()
 	return currentAttackFunction
 end
 
--- REMOVED: createRadiusIndicator function
-
 --== ENEMY DETECTION ==
 local function updateEnemies()
 	local enemyFolder = Workspace:FindFirstChild("Runtime") and Workspace.Runtime:FindFirstChild("Enemies")
@@ -188,8 +186,6 @@ local function onCharacterAdded(char)
 	character = char
 	rootPart = character:WaitForChild("HumanoidRootPart")
 	clearHighlights()
-
-	-- REMOVED: Radius Indicator update logic
 	
 	savedSettings.wasAttacking = savedSettings.attacking
 
@@ -260,7 +256,7 @@ task.spawn(function()
 	end
 end)
 
---== MODERN GUI (From Advanced Script) ==
+--== MODERN GUI ==
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "AutoAttackGui"
 ScreenGui.DisplayOrder = 99999
@@ -298,14 +294,14 @@ end
 -- MAIN FRAME (modern/stylish)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "Main"
-mainFrame.Size = UDim2.new(0,280,0,140) -- Adjusted height to fit without radius button
+mainFrame.Size = UDim2.new(0,280,0,140) 
 mainFrame.Position = UDim2.new(0.05,0,0.25,0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12,16,22)
 mainFrame.BackgroundTransparency = 0.06
 mainFrame.BorderSizePixel = 0
 mainFrame.ZIndex = 1
-mainFrame.Active = true -- Added for dragging
-mainFrame.Draggable = true -- Reverted to simple dragging
+mainFrame.Active = true 
+mainFrame.Draggable = true 
 mainFrame.Parent = ScreenGui
 
 local mainCorner = Instance.new("UICorner", mainFrame)
@@ -372,7 +368,6 @@ closeStroke.Thickness = 1
 applyHover(closeButton, {danger = false})
 closeButton.MouseButton1Click:Connect(function()
 	ScreenGui:Destroy()
-	-- Clean up radius indicator if it somehow exists
 	if radiusIndicator then radiusIndicator:Destroy() end
 end)
 
@@ -455,10 +450,10 @@ createApply(UDim2.new(0,180,0,88), function()
 	end
 end)
 
--- ATTACK TOGGLE BUTTON (Position adjusted up due to smaller frame size)
+-- ATTACK TOGGLE BUTTON
 toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0,80,0,28)
-toggleButton.Position = UDim2.new(0.5,-40,1,-38) -- Adjusted Y position
+toggleButton.Position = UDim2.new(0.5,-40,1,-38) 
 toggleButton.Text = "Start"
 toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
 toggleButton.TextColor3 = Color3.fromRGB(0,170,255)
@@ -510,5 +505,3 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		miniToggle.Text = mainFrame.Visible and "<<" or ">>"
 	end
 end)
-
--- Removed custom dragging logic since mainFrame.Draggable is set to true
