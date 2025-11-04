@@ -7,33 +7,60 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService") 
 
 local player = Players.LocalPlayer
--- Ensure the player object is loaded before continuing.
-repeat task.wait() until player and player.Parent and player.PlayerGui
+-- Wait until player is fully loaded
+repeat task.wait() until player and player.Parent and player:FindFirstChild("PlayerGui")
+
+--== CONNECTION MANAGEMENT & CLEANUP ==
+local connections = {}
+local scriptAlive = true
+
+local function cleanup()
+    -- 1. Stop all loops immediately
+    scriptAlive = false
+    savedSettings.attacking = false
+    
+    -- 2. Disconnect all connections
+    for _, conn in ipairs(connections) do
+        if conn and typeof(conn) == "RBXScriptConnection" then
+            conn:Disconnect()
+        end
+    end
+    
+    -- 3. Clear highlights/visuals
+    clearHighlights()
+    
+    -- 4. Destroy GUI element if it still exists
+    local existingGui = player.PlayerGui:FindFirstChild(GUI_NAME)
+    if existingGui then
+        existingGui:Destroy()
+    end
+
+    -- 5. Terminate the script instance
+    script:Destroy()
+end
 
 --== GUARD CLAUSE: PREVENT DUPLICATES & CLEANUP ==
--- Safely get PlayerGui
 local PlayerGui = player:FindFirstChild("PlayerGui")
+local GUI_NAME = "AutoAttackGui"
+
 if not PlayerGui then 
     warn("[AutoAttack Guard] PlayerGui not found. Terminating new script.") 
     script:Destroy() 
     return 
 end
 
-local GUI_NAME = "AutoAttackGui"
 local existingGui = PlayerGui:FindFirstChild(GUI_NAME)
 
 if existingGui then
-	warn("[AutoAttack Guard] Found existing instance of the script/GUI.")
+	warn("[AutoAttack Guard] Found existing instance of the script/GUI. Initiating cleanup of old script.")
     
-    -- Attempt to destroy the parent object (which is often the old script instance)
     local oldScript = existingGui.Parent
     
-    -- Safely check and destroy the old script instance
     if oldScript and oldScript:IsA("LocalScript") and oldScript ~= script then 
         warn("[AutoAttack Guard] Destroying old LocalScript instance.")
+        -- The script destruction *should* stop its execution, but a safe cleanup is ideal.
         oldScript:Destroy()
     else
-        -- If parent is not the script, destroy the GUI directly for cleanup.
         existingGui:Destroy()
     end
     
@@ -41,12 +68,10 @@ if existingGui then
 end
 --================================================
 
--- Rest of the script remains unchanged but is included for completeness.
-
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
-	radius = 100,
-	attackInterval = 0.1,
+	radius = 20,
+	attackInterval = 0.5,
 	attacking = false,
 	wasAttacking = false
 }
@@ -65,7 +90,6 @@ local radiusIndicator
 local baseToolPrefix = "Tool_Character_1160945383_"
 
 local function findLatestTool()
-    -- Safely check for ReplicatedStorage/Runtime
     local runtime = ReplicatedStorage:FindFirstChild("Runtime")
     if not runtime then return nil end
     local actorsFolder = runtime:FindFirstChild("Actors")
@@ -113,9 +137,9 @@ end
 -- Auto-refresh when new tools appear/disappear
 task.spawn(function()
     local runtime = ReplicatedStorage:FindFirstChild("Runtime")
-    if not runtime then return end -- Nil check
+    if not runtime then return end
 	local actorsFolder = runtime:FindFirstChild("Actors")
-    if not actorsFolder then return end -- Nil check
+    if not actorsFolder then return end
 
 	local function refreshTool()
 		local newTool = findLatestTool()
@@ -124,21 +148,21 @@ task.spawn(function()
 		end
 	end
 
-	actorsFolder.ChildAdded:Connect(function(child)
-		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
-			task.wait(0.2)
-			refreshTool()
-		end
-	end)
+    -- Storing Connections
+    table.insert(connections, actorsFolder.ChildAdded:Connect(function(child)
+        if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
+            task.wait(0.2)
+            refreshTool()
+        end
+    end))
+    table.insert(connections, actorsFolder.ChildRemoved:Connect(function(child)
+        if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
+            task.wait(0.2)
+            refreshTool()
+        end
+    end))
 
-	actorsFolder.ChildRemoved:Connect(function(child)
-		if child.Name:sub(1, #baseToolPrefix) == baseToolPrefix then
-			task.wait(0.2)
-			refreshTool()
-		end
-	end)
-
-	while true do
+	while scriptAlive do -- Check loop termination flag
 		if not currentAttackFunction or not currentAttackFunction.Parent then
 			refreshTool()
 		end
@@ -217,13 +241,13 @@ end
 
 local highlightThrottle = 0.05
 local highlightTimer = 0
-RunService.RenderStepped:Connect(function(dt)
+table.insert(connections, RunService.RenderStepped:Connect(function(dt)
 	highlightTimer += dt
 	if highlightTimer >= highlightThrottle then
 		updateHighlights()
 		highlightTimer = 0
 	end
-end)
+end))
 
 --== CHARACTER HANDLING ==
 local function onCharacterAdded(char)
@@ -236,9 +260,9 @@ local function onCharacterAdded(char)
 	repeat
 		currentAttackFunction = getCurrentAttackFunction()
 		task.wait(0.2)
-	until currentAttackFunction
+	until currentAttackFunction or not scriptAlive -- Ensure we stop waiting if script is killed
 
-	if savedSettings.wasAttacking then
+	if savedSettings.wasAttacking and scriptAlive then
 		savedSettings.attacking = true
 		if toggleButton then
 			toggleButton.Text = "Stop"
@@ -247,14 +271,14 @@ local function onCharacterAdded(char)
 	end
 end
 
--- Simple logic: Direct connections
-player.CharacterAdded:Connect(onCharacterAdded)
-player.CharacterRemoving:Connect(function()
+-- Storing Connections
+table.insert(connections, player.CharacterAdded:Connect(onCharacterAdded))
+table.insert(connections, player.CharacterRemoving:Connect(function()
 	clearHighlights()
 	character = nil
 	rootPart = nil
 	enemiesCache = {}
-end)
+end))
 
 if player.Character then
 	onCharacterAdded(player.Character)
@@ -262,11 +286,11 @@ end
 
 --== AUTO ATTACK LOOP (RADIUS FILTERED) ==
 task.spawn(function()
-	while true do
+	while scriptAlive do -- Check loop termination flag
 		if savedSettings.attacking then
 			local attackFunc = getCurrentAttackFunction()
 			if not attackFunc or not rootPart then
-				task.wait(0.1)
+				task.wait(savedSettings.attackInterval)
 				continue
 			end
 
@@ -318,7 +342,7 @@ local function tweenInstance(obj, props, time)
 	local info = TweenInfo.new(time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     
 	local success, tween = pcall(function() 
-        if obj then return TweenService:Create(obj, info, props) end
+        if obj and TweenService then return TweenService:Create(obj, info, props) end
         return nil, nil
     end)
 	if success and tween then tween:Play() end
@@ -334,13 +358,13 @@ local buttonHoverProps = {
 local function applyHover(btn, opts)
 	if not btn then return end 
     
-	btn.MouseEnter:Connect(function()
+	table.insert(connections, btn.MouseEnter:Connect(function()
 		local bColor = (opts and opts.danger) and buttonHoverProps.danger or buttonHoverProps.brighten
 		tweenInstance(btn, {BackgroundColor3 = bColor}, 0.12)
-	end)
-	btn.MouseLeave:Connect(function()
+	end))
+	table.insert(connections, btn.MouseLeave:Connect(function()
 		tweenInstance(btn, {BackgroundColor3 = opts and (opts.danger and buttonHoverProps.danger or buttonHoverProps.normal) or buttonHoverProps.normal}, 0.12)
-	end)
+	end))
 end
 
 -- MAIN FRAME (modern/stylish)
@@ -377,7 +401,6 @@ local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
 titleBar.Size = UDim2.new(1,0,0,36)
 titleBar.BackgroundTransparency = 1
-mainFrame.Parent:IsA("ScreenGui") -- Safely ensure ScreenGui exists
 titleBar.Parent = mainFrame
 
 local titleAccent = Instance.new("Frame", titleBar)
@@ -419,21 +442,9 @@ closeStroke.Transparency = 0.7
 closeStroke.Thickness = 1
 
 applyHover(closeButton, {danger = false})
-closeButton.MouseButton1Click:Connect(function()
-	-- 1. Stop attacking logic (if running)
-	savedSettings.attacking = false
-	
-	-- 2. Clear all highlights in the workspace
-	clearHighlights()
-	
-	-- 3. Destroy the entire GUI element (and all children)
-	if ScreenGui then 
-	    ScreenGui:Destroy()
-    end
-	
-	-- 4. Terminate the script (THE MOST RELIABLE METHOD)
-	script:Destroy()
-end)
+table.insert(connections, closeButton.MouseButton1Click:Connect(function()
+	cleanup() -- Call the dedicated cleanup function
+end))
 
 -- LABELS & TEXTBOXES
 local function createLabel(text,pos)
@@ -497,7 +508,7 @@ local function createApply(pos,callback)
 	stroke.Color = Color3.fromRGB(20,60,95)
 	stroke.Transparency = 0.7
 	stroke.Thickness = 1
-	btn.MouseButton1Click:Connect(callback)
+	table.insert(connections, btn.MouseButton1Click:Connect(callback))
 	applyHover(btn)
 	return btn
 end
@@ -539,7 +550,7 @@ local toggleCorner = Instance.new("UICorner")
 toggleCorner.CornerRadius = UDim.new(0,12)
 toggleCorner.Parent = toggleButton
 
-toggleButton.MouseButton1Click:Connect(function()
+table.insert(connections, toggleButton.MouseButton1Click:Connect(function()
 	savedSettings.attacking = not savedSettings.attacking
 	if toggleButton then
         if savedSettings.attacking then
@@ -550,7 +561,7 @@ toggleButton.MouseButton1Click:Connect(function()
             toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
         end
     end
-end)
+end))
 applyHover(toggleButton)
 
 -- MINI FLOATING TOGGLE
@@ -568,20 +579,20 @@ local miniCorner = Instance.new("UICorner")
 miniCorner.CornerRadius = UDim.new(0,12)
 miniCorner.Parent = miniToggle
 
-miniToggle.MouseButton1Click:Connect(function()
+table.insert(connections, miniToggle.MouseButton1Click:Connect(function()
     if mainFrame and miniToggle then
 	    mainFrame.Visible = not mainFrame.Visible
 	    miniToggle.Text = mainFrame.Visible and "<<" or ">>"
     end
-end)
+end))
 applyHover(miniToggle)
 
 -- F1 HOTKEY
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if not gameProcessed and input.KeyCode == Enum.KeyCode.F1 then
         if mainFrame and miniToggle then
 		    mainFrame.Visible = not mainFrame.Visible
 		    miniToggle.Text = mainFrame.Visible and "<<" or ">>"
         end
 	end
-end)
+end))
