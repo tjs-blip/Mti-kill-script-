@@ -45,8 +45,8 @@ end
 
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
-	radius = 20,
-	attackInterval = 0.5,
+	radius = 100,
+	attackInterval = 0.1,
 	attacking = false,
 	wasAttacking = false
 }
