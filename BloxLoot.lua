@@ -4,15 +4,15 @@ local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService") -- Added for Advanced GUI
+local TweenService = game:GetService("TweenService") 
 
 local player = Players.LocalPlayer
 repeat task.wait() until player
 
 --== PERSISTENT SETTINGS ==
 local savedSettings = {
-	radius = 100,
-	attackInterval = 0.1,
+	radius = 20,
+	attackInterval = 0.5,
 	attacking = false,
 	wasAttacking = false
 }
@@ -25,7 +25,7 @@ local enemiesCache = {}
 local toggleButton
 local currentAttackFunction
 local cachedAttackFunctions = {}
-local radiusIndicator
+local radiusIndicator -- Retained as a variable, but its creation/use logic is removed
 
 --== STRICT AUTO TOOL DETECTION ==
 local baseToolPrefix = "Tool_Character_1160945383_"
@@ -72,7 +72,7 @@ local function getAttackFunction()
 	end
 end
 
--- Auto-refresh when new tools appear/disappear (Simple Logic)
+-- Auto-refresh when new tools appear/disappear
 task.spawn(function()
 	local actorsFolder = ReplicatedStorage:WaitForChild("Runtime"):WaitForChild("Actors")
 
@@ -112,36 +112,7 @@ local function getCurrentAttackFunction()
 	return currentAttackFunction
 end
 
--- Create radius visualization part (From Advanced GUI)
-local function createRadiusIndicator()
-	if radiusIndicator then 
-		radiusIndicator:Destroy()
-	end
-	
-	radiusIndicator = Instance.new("Part")
-	radiusIndicator.Name = "RadiusIndicator"
-	radiusIndicator.Anchored = true
-	radiusIndicator.CanCollide = false
-	radiusIndicator.Transparency = 0.8
-	radiusIndicator.Material = Enum.Material.Neon
-	radiusIndicator.Color = Color3.fromRGB(0, 170, 255)
-	radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
-	radiusIndicator.Shape = Enum.PartType.Cylinder
-	
-	if rootPart then
-		radiusIndicator.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, 0, math.rad(90))
-	end
-	
-	-- Create highlight effect
-	local highlight = Instance.new("Highlight")
-	highlight.FillTransparency = 0.95
-	highlight.OutlineTransparency = 0.7
-	highlight.FillColor = Color3.fromRGB(0, 170, 255)
-	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-	highlight.Parent = radiusIndicator
-	
-	radiusIndicator.Parent = workspace
-end
+-- REMOVED: createRadiusIndicator function
 
 --== ENEMY DETECTION ==
 local function updateEnemies()
@@ -218,12 +189,8 @@ local function onCharacterAdded(char)
 	rootPart = character:WaitForChild("HumanoidRootPart")
 	clearHighlights()
 
-	-- Update radius indicator (From Advanced GUI)
-	if radiusIndicator then
-		radiusIndicator.Position = rootPart.Position
-		radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
-	end
-
+	-- REMOVED: Radius Indicator update logic
+	
 	savedSettings.wasAttacking = savedSettings.attacking
 
 	repeat
@@ -331,12 +298,14 @@ end
 -- MAIN FRAME (modern/stylish)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "Main"
-mainFrame.Size = UDim2.new(0,280,0,180)
+mainFrame.Size = UDim2.new(0,280,0,140) -- Adjusted height to fit without radius button
 mainFrame.Position = UDim2.new(0.05,0,0.25,0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12,16,22)
 mainFrame.BackgroundTransparency = 0.06
 mainFrame.BorderSizePixel = 0
 mainFrame.ZIndex = 1
+mainFrame.Active = true -- Added for dragging
+mainFrame.Draggable = true -- Reverted to simple dragging
 mainFrame.Parent = ScreenGui
 
 local mainCorner = Instance.new("UICorner", mainFrame)
@@ -370,40 +339,6 @@ titleAccent.BorderSizePixel = 0
 local accentCorner = Instance.new("UICorner", titleAccent)
 accentCorner.CornerRadius = UDim.new(0,4)
 
--- Create show radius toggle
-local showRadiusToggle = Instance.new("TextButton")
-showRadiusToggle.Size = UDim2.new(0,80,0,28)
-showRadiusToggle.Position = UDim2.new(0,180,0,128)
-showRadiusToggle.Text = "Show Radius"
-showRadiusToggle.BackgroundColor3 = buttonHoverProps.normal
-showRadiusToggle.TextColor3 = buttonHoverProps.text
-showRadiusToggle.Font = Enum.Font.GothamBold
-showRadiusToggle.TextSize = 12
-showRadiusToggle.AutoButtonColor = false
-showRadiusToggle.Parent = mainFrame
-local radiusCorner = Instance.new("UICorner", showRadiusToggle)
-radiusCorner.CornerRadius = UDim.new(0,12)
-local radiusStroke = Instance.new("UIStroke", showRadiusToggle)
-radiusStroke.Color = Color3.fromRGB(20,60,95)
-radiusStroke.Transparency = 0.7
-radiusStroke.Thickness = 1
-
-local showingRadius = false
-showRadiusToggle.MouseButton1Click:Connect(function()
-	showingRadius = not showingRadius
-	if showingRadius then
-		createRadiusIndicator()
-		showRadiusToggle.BackgroundColor3 = Color3.fromRGB(0,100,170)
-	else
-		if radiusIndicator then
-			radiusIndicator:Destroy()
-			radiusIndicator = nil
-		end
-		showRadiusToggle.BackgroundColor3 = buttonHoverProps.normal
-	end
-end)
-applyHover(showRadiusToggle)
-
 local titleText = Instance.new("TextLabel")
 titleText.Size = UDim2.new(1,-68,1,0)
 titleText.Position = UDim2.new(0,12,0,0)
@@ -421,7 +356,7 @@ local closeButton = Instance.new("TextButton")
 closeButton.Size = UDim2.new(0,34,0,28)
 closeButton.Position = UDim2.new(1,-42,0,4)
 closeButton.BackgroundColor3 = buttonHoverProps.normal
-closeButton.TextColor3 = buttonHoverProps.text
+closeButton.TextColor3 = Color3.fromRGB(0,170,255)
 closeButton.Text = "✕"
 closeButton.Font = Enum.Font.GothamBold
 closeButton.TextSize = 16
@@ -435,9 +370,10 @@ closeStroke.Transparency = 0.7
 closeStroke.Thickness = 1
 
 applyHover(closeButton, {danger = false})
--- MODIFIED: Change to ScreenGui:Destroy() to match simple logic
 closeButton.MouseButton1Click:Connect(function()
 	ScreenGui:Destroy()
+	-- Clean up radius indicator if it somehow exists
+	if radiusIndicator then radiusIndicator:Destroy() end
 end)
 
 -- LABELS & TEXTBOXES
@@ -505,11 +441,6 @@ createApply(UDim2.new(0,180,0,48), function()
 	local val = tonumber(radiusBox.Text)
 	if val and val > 0 then
 		savedSettings.radius = val
-		-- MODIFIED: No radiusSq update
-		if radiusIndicator and rootPart then
-			radiusIndicator.Size = Vector3.new(savedSettings.radius*2, 0.1, savedSettings.radius*2)
-			radiusIndicator.Position = rootPart.Position
-		end
 	else
 		radiusBox.Text = tostring(savedSettings.radius)
 	end
@@ -524,10 +455,10 @@ createApply(UDim2.new(0,180,0,88), function()
 	end
 end)
 
--- ATTACK TOGGLE BUTTON
+-- ATTACK TOGGLE BUTTON (Position adjusted up due to smaller frame size)
 toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0,80,0,28)
-toggleButton.Position = UDim2.new(0.5,-40,1,-50)
+toggleButton.Position = UDim2.new(0.5,-40,1,-38) -- Adjusted Y position
 toggleButton.Text = "Start"
 toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
 toggleButton.TextColor3 = Color3.fromRGB(0,170,255)
@@ -580,39 +511,4 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	end
 end)
 
--- New: simple drag handling (From Advanced GUI)
-local dragging = false
-local dragStart = Vector2.new()
-local startPos = mainFrame.Position
-local dragInput
-
-titleBar.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-		dragging = true
-		dragStart = input.Position
-		startPos = mainFrame.Position
-		input.Changed:Connect(function()
-			if input.UserInputState == Enum.UserInputState.End then
-				dragging = false
-			end
-		end)
-	end
-end)
-titleBar.InputChanged:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-		dragInput = input
-	end
-end)
-UserInputService.InputChanged:Connect(function(input)
-	if dragging and input == dragInput then
-		local delta = input.Position - dragStart
-		mainFrame.Position = UDim2.new(
-			startPos.X.Scale,
-			startPos.X.Offset + delta.X,
-			startPos.Y.Scale,
-			startPos.Y.Offset + delta.Y
-		)
-	end
-end)
-
--- REMOVED: All cleanup() and connection tracking logic
+-- Removed custom dragging logic since mainFrame.Draggable is set to true
