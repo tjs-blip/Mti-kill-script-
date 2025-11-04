@@ -25,7 +25,7 @@ local enemiesCache = {}
 local toggleButton
 local currentAttackFunction
 local cachedAttackFunctions = {}
-local radiusIndicator -- Retained as a variable, but unused
+local radiusIndicator 
 
 --== STRICT AUTO TOOL DETECTION ==
 local baseToolPrefix = "Tool_Character_1160945383_"
@@ -294,7 +294,8 @@ end
 -- MAIN FRAME (modern/stylish)
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "Main"
-mainFrame.Size = UDim2.new(0,280,0,140) 
+-- HEIGHT MODIFIED BACK TO 180
+mainFrame.Size = UDim2.new(0,280,0,180) 
 mainFrame.Position = UDim2.new(0.05,0,0.25,0)
 mainFrame.BackgroundColor3 = Color3.fromRGB(12,16,22)
 mainFrame.BackgroundTransparency = 0.06
@@ -450,10 +451,10 @@ createApply(UDim2.new(0,180,0,88), function()
 	end
 end)
 
--- ATTACK TOGGLE BUTTON
+-- ATTACK TOGGLE BUTTON (Position adjusted to sit higher in the frame)
 toggleButton = Instance.new("TextButton")
 toggleButton.Size = UDim2.new(0,80,0,28)
-toggleButton.Position = UDim2.new(0.5,-40,1,-38) 
+toggleButton.Position = UDim2.new(0.5,-40,0,138) -- Positioned lower to match new height
 toggleButton.Text = "Start"
 toggleButton.BackgroundColor3 = Color3.fromRGB(0,50,100)
 toggleButton.TextColor3 = Color3.fromRGB(0,170,255)
