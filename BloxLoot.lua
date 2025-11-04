@@ -36,44 +36,12 @@ local maxHighlights = 32 -- cap how many selection boxes we keep alive
 local updateEnemiesInterval = 0.25 -- seconds between full enemy scans
 local lastEnemiesUpdate = 0
 
--- collect all enemy references
-local masterEnemyList = {}
-
--- set up enemy tracking
+-- Get enemies folder reference
+local enemiesFolder
 task.spawn(function()
     local runtime = Workspace:FindFirstChild("Runtime") or Workspace:WaitForChild("Runtime")
     if runtime then
-        local enemiesFolder = runtime:FindFirstChild("Enemies") or runtime:WaitForChild("Enemies")
-        
-        -- just wait once for the folder to load
-        if not enemiesFolder then
-            enemiesFolder = runtime:WaitForChild("Enemies")
-        end
-
-        -- Function to add enemy to master list
-        local function addEnemy(model)
-            if model:IsA("Model") then
-                -- Wait for components to load
-                task.spawn(function()
-                    local actorId = model:FindFirstChild("ActorId") or model:WaitForChild("ActorId")
-                    local part = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart or model:WaitForChild("HumanoidRootPart")
-                    if actorId and part then
-                        masterEnemyList[model] = {
-                            actorId = actorId,
-                            part = part
-                        }
-                    end
-                end)
-            end
-        end
-        
-        -- Add all existing enemies
-        for _, model in ipairs(enemiesFolder:GetChildren()) do
-            addEnemy(model)
-        end
-
-        -- Listen for new enemies
-        track(enemiesFolder.ChildAdded:Connect(addEnemy))
+        enemiesFolder = runtime:FindFirstChild("Enemies") or runtime:WaitForChild("Enemies")
     end
 end)
 
@@ -225,19 +193,29 @@ end
 
 --== ENEMY DETECTION ==
 local function updateEnemies()
-    if not rootPart then return end
+    if not rootPart or not enemiesFolder then return end
     local now = tick()
     if now - lastEnemiesUpdate < updateEnemiesInterval then return end
     lastEnemiesUpdate = now
 
-    -- update cache with valid enemies from our fixed list
-    enemiesCache = {}
+    -- Use Region3 to get enemies in radius
     local playerPos = rootPart.Position
-    for model, data in pairs(masterEnemyList) do
-        if data.part.Parent then -- quick parent check only
-            local dsq = sqrDist(data.part.Position, playerPos)
+    local region = Region3.new(
+        playerPos - Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius),
+        playerPos + Vector3.new(savedSettings.radius, savedSettings.radius, savedSettings.radius)
+    )
+    
+    -- Get parts in region
+    enemiesCache = {}
+    local parts = workspace:FindPartsInRegion3(region, nil, 100)
+    for _, part in ipairs(parts) do
+        -- Check if part belongs to an enemy
+        local model = part:FindFirstAncestorOfClass("Model")
+        if model and model.Parent == enemiesFolder then
+            -- Double check exact distance (since Region3 is a cube)
+            local dsq = sqrDist(part.Position, playerPos)
             if dsq <= savedSettings.radiusSq then
-                enemiesCache[model] = data.part
+                enemiesCache[model] = part
             end
         end
     end
@@ -326,11 +304,14 @@ task.spawn(function()
         if savedSettings.attacking then
             local attackFunc = getCurrentAttackFunction()
             if attackFunc then
+                updateEnemies() -- Update nearby enemies
+                
                 local targets = {}
-                -- Send every enemy's ActorId and part
-                for _, data in pairs(masterEnemyList) do
-                    if data.actorId and data.actorId.Parent then -- only check if ActorId still exists
-                        targets[data.actorId.Value] = data.part
+                -- Use cached nearby enemies
+                for model, part in pairs(enemiesCache) do
+                    local actorId = model:FindFirstChild("ActorId")
+                    if actorId then
+                        targets[actorId.Value] = part
                     end
                 end
                 
