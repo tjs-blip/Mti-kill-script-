@@ -1,369 +1,458 @@
 --[[
-    AXE TOGGLE LOCAL SCRIPT (MODIFIED: Added Target Self Toggle)
+    AXE PANEL — Refined compact UI
 ]]
 
 ----------------------------------------------------
--- 1. SERVICES & VARIABLES
+-- SERVICES
 ----------------------------------------------------
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
-local UserInputService  = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService      = game:GetService("TweenService")
 local Workspace         = game:GetService("Workspace")
 local CoreGui           = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Character   = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-
 local RemoteEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("Axe")
 
-local isNPCToggled        = false
-local isPlayerKillToggled = false
-local isSelfTargetToggled = false -- NEW VARIABLE
-local lastAttackTime      = 0
-local DEFAULT_INTERVAL    = 0.3
-local AttackInterval      = LocalPlayer:GetAttribute("SavedAttackInterval") or DEFAULT_INTERVAL
-
--- BLACK & WHITE PALETTE
-local BG          = Color3.fromRGB(8, 8, 8)
-local SURFACE     = Color3.fromRGB(18, 18, 18)
-local BORDER      = Color3.fromRGB(38, 38, 38)
-local BTN_WHITE   = Color3.fromRGB(255, 255, 255)
-local BTN_TEXT    = Color3.fromRGB(8, 8, 8)
-local TEXT_BRIGHT = Color3.fromRGB(255, 255, 255)
-local TEXT_DIM    = Color3.fromRGB(130, 130, 130)
-local OFF_COLOR   = Color3.fromRGB(28, 28, 28)
-
-local FRAME_WIDTH  = 270
-local FRAME_HEIGHT = 360 -- INCREASED HEIGHT FOR NEW BUTTON
-local TOGGLE_SIZE  = 36
-local RADIUS       = UDim.new(0, 6)
-local RADIUS_SM    = UDim.new(0, 4)
+----------------------------------------------------
+-- STATE
+----------------------------------------------------
+local flags     = { npc = false, player = false, self = false, heal = false }
+local timers    = { attack = 0, heal = 0 }
+local intervals = {
+    attack = LocalPlayer:GetAttribute("SavedAttackInterval") or 0.3,
+    heal   = LocalPlayer:GetAttribute("SavedHealInterval")   or 0.5,
+}
+local HEAL_AMOUNT = 999999999999999999
+local npcCache    = {}
+local playerCache = {}
 
 ----------------------------------------------------
--- 2. GUI CREATION
+-- INPUT HELPER
 ----------------------------------------------------
-local ScreenGui = Instance.new("ScreenGui", CoreGui)
-ScreenGui.Name         = "AxeToggleUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.DisplayOrder = 10
+local function onClick(btn, fn)
+    btn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then fn() end
+    end)
+end
 
-local ToggleButton = Instance.new("TextButton", ScreenGui)
-ToggleButton.Name             = "GUIToggleButton"
-ToggleButton.Size             = UDim2.fromOffset(TOGGLE_SIZE, TOGGLE_SIZE)
-ToggleButton.Position         = UDim2.fromOffset(12, 12)
-ToggleButton.BackgroundColor3 = BG
-ToggleButton.TextColor3       = TEXT_BRIGHT
-ToggleButton.Text             = "+"
-ToggleButton.Font             = Enum.Font.GothamBold
-ToggleButton.TextSize         = 22
-ToggleButton.AutoButtonColor  = false
-ToggleButton.ZIndex           = 20
-ToggleButton.Active           = true
-Instance.new("UICorner", ToggleButton).CornerRadius = RADIUS
+----------------------------------------------------
+-- CACHE
+----------------------------------------------------
+local function rebuildCache()
+    npcCache = {}; playerCache = {}
+    for _, d in ipairs(Workspace:GetDescendants()) do
+        if d:IsA("Humanoid") then
+            local m = d.Parent
+            if m and m:IsA("Model") then
+                local plr = Players:GetPlayerFromCharacter(m)
+                if plr then
+                    if flags.self or plr ~= LocalPlayer then playerCache[m] = true end
+                else npcCache[m] = true end
+            end
+        end
+    end
+end
+rebuildCache()
 
-local toggleBorder = Instance.new("UIStroke", ToggleButton)
-toggleBorder.Color     = BORDER
-toggleBorder.Thickness = 1
+Workspace.DescendantAdded:Connect(function(d)
+    if not d:IsA("Humanoid") then return end
+    local m = d.Parent
+    if not (m and m:IsA("Model")) then return end
+    local plr = Players:GetPlayerFromCharacter(m)
+    if plr then
+        if flags.self or plr ~= LocalPlayer then playerCache[m] = true end
+    else npcCache[m] = true end
+end)
+Workspace.DescendantRemoving:Connect(function(d)
+    npcCache[d] = nil; playerCache[d] = nil
+end)
+LocalPlayer.CharacterAdded:Connect(function(c)
+    Character = c
+    if flags.self then playerCache[c] = true end
+end)
 
-local Frame = Instance.new("Frame", ScreenGui)
-Frame.Name                   = "AxeControls"
-Frame.Size                   = UDim2.fromOffset(FRAME_WIDTH, FRAME_HEIGHT)
-Frame.Position               = UDim2.new(0.5, -FRAME_WIDTH/2, 0.5, -FRAME_HEIGHT/2)
-Frame.BackgroundColor3       = BG
-Frame.BorderSizePixel        = 0
-Frame.Visible                = false
-Frame.Active                 = true
-Frame.ZIndex                 = 10
-Instance.new("UICorner", Frame).CornerRadius = RADIUS
+----------------------------------------------------
+-- PALETTE
+----------------------------------------------------
+local C = {
+    bg      = Color3.fromRGB(10,  10,  10),
+    surface = Color3.fromRGB(20,  20,  20),
+    card    = Color3.fromRGB(16,  16,  16),
+    border  = Color3.fromRGB(38,  38,  38),
+    bordHi  = Color3.fromRGB(70,  70,  70),
+    white   = Color3.fromRGB(235, 235, 235),
+    dim     = Color3.fromRGB(85,  85,  85),
+    muted   = Color3.fromRGB(50,  50,  50),
+    green   = Color3.fromRGB(60,  200, 100),
+    greenDk = Color3.fromRGB(20,  55,  35),
+}
 
-local frameBorder = Instance.new("UIStroke", Frame)
-frameBorder.Color     = BORDER
-frameBorder.Thickness = 1
+local W   = 210
+local R   = UDim.new(0, 9)
+local RS  = UDim.new(0, 5)
+local RSX = UDim.new(0, 4)
 
-local DragHandle = Instance.new("Frame", Frame)
-DragHandle.Name             = "DragHandle"
-DragHandle.Position         = UDim2.fromOffset(12, 12)
-DragHandle.Size             = UDim2.fromOffset(FRAME_WIDTH - 24, 32)
-DragHandle.BackgroundColor3 = SURFACE
-DragHandle.BorderSizePixel  = 0
-DragHandle.ZIndex           = 12
-DragHandle.Active           = true
-Instance.new("UICorner", DragHandle).CornerRadius = RADIUS_SM
+----------------------------------------------------
+-- ROOT
+----------------------------------------------------
+local old = CoreGui:FindFirstChild("AxePanel")
+if old then old:Destroy() end
 
-local handleBorder = Instance.new("UIStroke", DragHandle)
-handleBorder.Color     = BORDER
-handleBorder.Thickness = 1
+local Root = Instance.new("ScreenGui", CoreGui)
+Root.Name = "AxePanel"; Root.ResetOnSpawn = false; Root.DisplayOrder = 99
 
-local titleLabel = Instance.new("TextLabel", DragHandle)
-titleLabel.Position               = UDim2.fromOffset(12, 0)
-titleLabel.Size                   = UDim2.fromOffset(FRAME_WIDTH - 60, 32)
-titleLabel.BackgroundTransparency = 1
-titleLabel.TextColor3             = TEXT_BRIGHT
-titleLabel.Text                   = "AXE PANEL"
-titleLabel.TextXAlignment         = Enum.TextXAlignment.Left
-titleLabel.Font                   = Enum.Font.GothamBold
-titleLabel.TextSize               = 12
-titleLabel.ZIndex                 = 13
+----------------------------------------------------
+-- FLOATING PILL
+----------------------------------------------------
+local Pill = Instance.new("TextButton", Root)
+Pill.Size             = UDim2.fromOffset(42, 20)
+Pill.Position         = UDim2.fromOffset(12, 12)
+Pill.BackgroundColor3 = C.surface
+Pill.TextColor3       = C.dim
+Pill.Text             = "AXE"
+Pill.Font             = Enum.Font.GothamBold
+Pill.TextSize         = 9
+Pill.AutoButtonColor  = false
+Pill.ZIndex           = 20
+Pill.Active           = true
+Instance.new("UICorner", Pill).CornerRadius = UDim.new(1, 0)
+local pillS = Instance.new("UIStroke", Pill)
+pillS.Color = C.border; pillS.Thickness = 1
 
-local function makeButton(parent, yPos, labelText, badgeText)
-    local btn = Instance.new("TextButton", parent)
-    btn.Position         = UDim2.fromOffset(12, yPos)
-    btn.Size             = UDim2.fromOffset(FRAME_WIDTH - 24, 48)
-    btn.BackgroundColor3 = BTN_WHITE
-    btn.Text             = ""
-    btn.AutoButtonColor  = false
-    btn.ZIndex           = 11
-    btn.Active           = true
-    Instance.new("UICorner", btn).CornerRadius = RADIUS
+----------------------------------------------------
+-- FRAME
+----------------------------------------------------
+local Frame = Instance.new("Frame", Root)
+Frame.Name             = "Panel"
+Frame.BackgroundColor3 = C.bg
+Frame.BorderSizePixel  = 0
+Frame.Visible          = false
+Frame.Active           = true
+Frame.ZIndex           = 10
+Frame.Size             = UDim2.fromOffset(W, 10)
+Instance.new("UICorner", Frame).CornerRadius = R
+local fS = Instance.new("UIStroke", Frame)
+fS.Color = C.border; fS.Thickness = 1
 
-    local lbl = Instance.new("TextLabel", btn)
-    lbl.Name                  = "Label"
-    lbl.Position              = UDim2.fromOffset(16, 0)
-    lbl.Size                  = UDim2.fromOffset(FRAME_WIDTH - 100, 48)
+----------------------------------------------------
+-- HEADER
+----------------------------------------------------
+local Header = Instance.new("Frame", Frame)
+Header.Size             = UDim2.fromOffset(W, 30)
+Header.Position         = UDim2.fromOffset(0, 0)
+Header.BackgroundColor3 = C.surface
+Header.BorderSizePixel  = 0
+Header.ZIndex           = 12
+Header.Active           = true
+Instance.new("UICorner", Header).CornerRadius = R
+
+local hFill = Instance.new("Frame", Header)
+hFill.Size             = UDim2.fromOffset(W, 14)
+hFill.Position         = UDim2.fromOffset(0, 16)
+hFill.BackgroundColor3 = C.surface
+hFill.BorderSizePixel  = 0
+hFill.ZIndex           = 12
+
+for i = 0, 2 do
+    local dot = Instance.new("Frame", Header)
+    dot.Size             = UDim2.fromOffset(4, 4)
+    dot.Position         = UDim2.fromOffset(11 + i * 8, 13)
+    dot.BackgroundColor3 = i == 0 and Color3.fromRGB(75,75,75)
+                         or i == 1 and Color3.fromRGB(52,52,52)
+                         or           Color3.fromRGB(36,36,36)
+    dot.BorderSizePixel  = 0
+    dot.ZIndex           = 14
+    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+end
+
+local titleLbl = Instance.new("TextLabel", Header)
+titleLbl.Position               = UDim2.fromOffset(40, 0)
+titleLbl.Size                   = UDim2.fromOffset(W - 40, 30)
+titleLbl.BackgroundTransparency = 1
+titleLbl.TextColor3             = C.white
+titleLbl.Text                   = "AXE PANEL"
+titleLbl.TextXAlignment         = Enum.TextXAlignment.Left
+titleLbl.Font                   = Enum.Font.GothamBold
+titleLbl.TextSize               = 9
+titleLbl.ZIndex                 = 13
+
+local hSep = Instance.new("Frame", Frame)
+hSep.Position         = UDim2.fromOffset(0, 30)
+hSep.Size             = UDim2.fromOffset(W, 1)
+hSep.BackgroundColor3 = C.border
+hSep.BorderSizePixel  = 0
+hSep.ZIndex           = 12
+
+----------------------------------------------------
+-- LAYOUT
+----------------------------------------------------
+local CY  = 34  -- start right after header
+local PAD = 7
+local RH  = 30  -- row height (was 34)
+local GAP = 3   -- gap between rows (was 4)
+
+----------------------------------------------------
+-- SECTION LABEL
+----------------------------------------------------
+local function makeSection(label)
+    CY += 5
+    local lbl = Instance.new("TextLabel", Frame)
+    lbl.Position               = UDim2.fromOffset(PAD + 2, CY)
+    lbl.Size                   = UDim2.fromOffset(W, 11)
     lbl.BackgroundTransparency = 1
-    lbl.TextColor3            = BTN_TEXT
-    lbl.Text                  = labelText
-    lbl.TextXAlignment        = Enum.TextXAlignment.Left
-    lbl.Font                  = Enum.Font.GothamBold
-    lbl.TextSize              = 13
-    lbl.ZIndex                = 12
-
-    local badge = Instance.new("TextLabel", btn)
-    badge.Name             = "Badge"
-    badge.Position         = UDim2.fromOffset(FRAME_WIDTH - 80, 13)
-    badge.Size             = UDim2.fromOffset(44, 22)
-    badge.BackgroundColor3 = OFF_COLOR
-    badge.TextColor3       = TEXT_DIM
-    badge.Text             = badgeText or "OFF"
-    badge.Font             = Enum.Font.GothamBold
-    badge.TextSize         = 10
-    badge.ZIndex           = 12
-    Instance.new("UICorner", badge).CornerRadius = RADIUS_SM
-
-    return btn
+    lbl.TextColor3             = C.muted
+    lbl.Text                   = label
+    lbl.TextXAlignment         = Enum.TextXAlignment.Left
+    lbl.Font                   = Enum.Font.GothamBold
+    lbl.TextSize               = 7
+    lbl.ZIndex                 = 11
+    CY += 13
 end
 
-local NPCToggle    = makeButton(Frame, 60,  "Kill NPCs",    "OFF")
-local PlayerToggle = makeButton(Frame, 120, "Kill Players", "OFF")
-local SelfToggle   = makeButton(Frame, 180, "Target Self",  "OFF") -- NEW BUTTON
-
-------------------------------------
--- INTERVAL GROUP (shifted down)
-------------------------------------
-local IntervalGroup = Instance.new("Frame", Frame)
-IntervalGroup.Name             = "InputGroup"
-IntervalGroup.Position         = UDim2.fromOffset(12, 244)
-IntervalGroup.Size             = UDim2.fromOffset(FRAME_WIDTH - 24, 100)
-IntervalGroup.BackgroundColor3 = SURFACE
-IntervalGroup.BorderSizePixel  = 0
-IntervalGroup.ZIndex           = 11
-Instance.new("UICorner", IntervalGroup).CornerRadius = RADIUS
-
-local sectionLabel = Instance.new("TextLabel", IntervalGroup)
-sectionLabel.Position               = UDim2.fromOffset(14, 10)
-sectionLabel.Size                   = UDim2.fromOffset(FRAME_WIDTH - 48, 16)
-sectionLabel.BackgroundTransparency = 1
-sectionLabel.TextColor3             = TEXT_DIM
-sectionLabel.Text                   = "ATTACK INTERVAL"
-sectionLabel.TextXAlignment         = Enum.TextXAlignment.Left
-sectionLabel.Font                   = Enum.Font.GothamBold
-sectionLabel.TextSize               = 9
-sectionLabel.ZIndex                 = 12
-
-local INPUT_W = (FRAME_WIDTH - 24 - 28 - 8) * 0.65
-local SET_W   = (FRAME_WIDTH - 24 - 28 - 8) * 0.35
-
-local IntervalBox = Instance.new("TextBox", IntervalGroup)
-IntervalBox.Name             = "IntervalTextBox"
-IntervalBox.Position         = UDim2.fromOffset(14, 50)
-IntervalBox.Size             = UDim2.fromOffset(INPUT_W, 34)
-IntervalBox.BackgroundColor3 = BG
-IntervalBox.TextColor3       = TEXT_BRIGHT
-IntervalBox.Text             = string.format("%.2f", AttackInterval)
-IntervalBox.Font             = Enum.Font.GothamBold
-IntervalBox.TextSize         = 16
-IntervalBox.ClearTextOnFocus = false
-IntervalBox.ZIndex           = 12
-Instance.new("UICorner", IntervalBox).CornerRadius = RADIUS_SM
-
-local SetButton = Instance.new("TextButton", IntervalGroup)
-SetButton.Name             = "SetButton"
-SetButton.Position         = UDim2.fromOffset(14 + INPUT_W + 8, 50)
-SetButton.Size             = UDim2.fromOffset(SET_W, 34)
-SetButton.BackgroundColor3 = BTN_WHITE
-SetButton.TextColor3       = BTN_TEXT
-SetButton.Text             = "SET"
-SetButton.Font             = Enum.Font.GothamBold
-SetButton.TextSize         = 12
-SetButton.AutoButtonColor  = false
-SetButton.ZIndex           = 12
-Instance.new("UICorner", SetButton).CornerRadius = RADIUS_SM
-
 ----------------------------------------------------
--- 3. TARGET CACHES
+-- TOGGLE ROW
 ----------------------------------------------------
-local npcModelCache   = {}
-local playerCharCache = {}
+local function makeRow(label, isHeal)
+    local row = Instance.new("TextButton", Frame)
+    row.Position         = UDim2.fromOffset(PAD, CY)
+    row.Size             = UDim2.fromOffset(W - PAD * 2, RH)
+    row.BackgroundColor3 = C.card
+    row.Text             = ""
+    row.AutoButtonColor  = false
+    row.ZIndex           = 11
+    row.Active           = true
+    Instance.new("UICorner", row).CornerRadius = RSX
+    local rS = Instance.new("UIStroke", row)
+    rS.Color = C.border; rS.Thickness = 1
 
-local function isPlayerCharacter(model)
-    return Players:GetPlayerFromCharacter(model) ~= nil
+    local lbl = Instance.new("TextLabel", row)
+    lbl.Position               = UDim2.fromOffset(9, 0)
+    lbl.Size                   = UDim2.fromOffset(W - 65, RH)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3             = C.dim
+    lbl.Text                   = label
+    lbl.TextXAlignment         = Enum.TextXAlignment.Left
+    lbl.Font                   = Enum.Font.GothamBold
+    lbl.TextSize               = 10
+    lbl.ZIndex                 = 12
+
+    local track = Instance.new("Frame", row)
+    track.Size             = UDim2.fromOffset(26, 13)
+    track.Position         = UDim2.fromOffset(W - PAD * 2 - 30, (RH - 13) / 2)
+    track.BackgroundColor3 = C.muted
+    track.BorderSizePixel  = 0
+    track.ZIndex           = 12
+    Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
+    local knob = Instance.new("Frame", track)
+    knob.Size             = UDim2.fromOffset(9, 9)
+    knob.Position         = UDim2.fromOffset(2, 2)
+    knob.BackgroundColor3 = C.dim
+    knob.BorderSizePixel  = 0
+    knob.ZIndex           = 13
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+    local onColor = isHeal and C.green or C.white
+
+    local function setState(on)
+        lbl.TextColor3         = on and C.white or C.dim
+        rS.Color               = on and C.bordHi or C.border
+        track.BackgroundColor3 = on and (isHeal and C.greenDk or C.surface) or C.muted
+        knob.BackgroundColor3  = on and onColor or C.dim
+        knob.Position          = on
+            and UDim2.fromOffset(26 - 11, 2)
+            or  UDim2.fromOffset(2, 2)
+    end
+
+    CY += RH + GAP
+    return row, setState
 end
 
-local function updateCaches()
-    npcModelCache = {}
-    playerCharCache = {}
-    for _, desc in ipairs(Workspace:GetDescendants()) do
-        if desc:IsA("Humanoid") then
-            local model = desc.Parent
-            if model and model:IsA("Model") then
-                local player = Players:GetPlayerFromCharacter(model)
-                if player then
-                    -- If Target Self is OFF, exclude LocalPlayer. If ON, include everyone.
-                    if isSelfTargetToggled or player ~= LocalPlayer then
-                        playerCharCache[model] = true
-                    end
-                else
-                    npcModelCache[model] = true
-                end
-            end
-        end
-    end
+----------------------------------------------------
+-- INPUT ROW
+----------------------------------------------------
+local function makeInput(label, default)
+    local GH  = 46
+    local grp = Instance.new("Frame", Frame)
+    grp.Position         = UDim2.fromOffset(PAD, CY)
+    grp.Size             = UDim2.fromOffset(W - PAD * 2, GH)
+    grp.BackgroundColor3 = C.card
+    grp.BorderSizePixel  = 0
+    grp.ZIndex           = 11
+    Instance.new("UICorner", grp).CornerRadius = RSX
+    local gS = Instance.new("UIStroke", grp)
+    gS.Color = C.border; gS.Thickness = 1
+
+    local lbl = Instance.new("TextLabel", grp)
+    lbl.Position               = UDim2.fromOffset(9, 5)
+    lbl.Size                   = UDim2.fromOffset(W, 11)
+    lbl.BackgroundTransparency = 1
+    lbl.TextColor3             = C.muted
+    lbl.Text                   = label
+    lbl.TextXAlignment         = Enum.TextXAlignment.Left
+    lbl.Font                   = Enum.Font.GothamBold
+    lbl.TextSize               = 7
+    lbl.ZIndex                 = 12
+
+    local IW = (W - PAD * 2 - 20 - 5) * 0.62
+    local SW = (W - PAD * 2 - 20 - 5) * 0.38
+
+    local box = Instance.new("TextBox", grp)
+    box.Position         = UDim2.fromOffset(9, 20)
+    box.Size             = UDim2.fromOffset(IW, 20)
+    box.BackgroundColor3 = C.bg
+    box.TextColor3       = C.white
+    box.Font             = Enum.Font.GothamBold
+    box.TextSize         = 11
+    box.ClearTextOnFocus = false
+    box.Text             = string.format("%.2f", default)
+    box.ZIndex           = 12
+    Instance.new("UICorner", box).CornerRadius = RS
+    local bS = Instance.new("UIStroke", box)
+    bS.Color = C.border; bS.Thickness = 1
+
+    local setBtn = Instance.new("TextButton", grp)
+    setBtn.Position         = UDim2.fromOffset(9 + IW + 5, 20)
+    setBtn.Size             = UDim2.fromOffset(SW, 20)
+    setBtn.BackgroundColor3 = C.white
+    setBtn.TextColor3       = C.bg
+    setBtn.Text             = "SET"
+    setBtn.Font             = Enum.Font.GothamBold
+    setBtn.TextSize         = 8
+    setBtn.AutoButtonColor  = false
+    setBtn.ZIndex           = 12
+    Instance.new("UICorner", setBtn).CornerRadius = RS
+
+    CY += GH + GAP
+    return box, setBtn
 end
 
-updateCaches()
+----------------------------------------------------
+-- BUILD
+----------------------------------------------------
+makeSection("COMBAT")
+local NPCRow,    setNPC    = makeRow("Kill NPCs")
+local PlayerRow, setPlayer = makeRow("Kill Players")
+local SelfRow,   setSelf   = makeRow("Target Self")
+makeSection("UTILITY")
+local HealRow,   setHeal   = makeRow("Heal Self", true)
+makeSection("TIMING")
+local AtkBox,  AtkSet  = makeInput("ATTACK INTERVAL (s)", intervals.attack)
+local HealBox, HealSet = makeInput("HEAL INTERVAL (s)",   intervals.heal)
 
-Workspace.DescendantAdded:Connect(function(desc)
-    if desc:IsA("Humanoid") then
-        local model = desc.Parent
-        if model and model:IsA("Model") then
-            local player = Players:GetPlayerFromCharacter(model)
-            if player then
-                if isSelfTargetToggled or player ~= LocalPlayer then
-                    playerCharCache[model] = true
-                end
-            else
-                npcModelCache[model] = true
-            end
-        end
-    end
-end)
-
-Workspace.DescendantRemoving:Connect(function(desc)
-    if desc:IsA("Model") then
-        npcModelCache[desc]   = nil
-        playerCharCache[desc] = nil
-    end
-end)
-
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    Character = newChar
-    if isSelfTargetToggled then playerCharCache[newChar] = true end
-end)
+CY += 6
+Frame.Size     = UDim2.fromOffset(W, CY)
+Frame.Position = UDim2.new(0.5, -W/2, 0.5, -CY/2)
 
 ----------------------------------------------------
--- 4. BUTTON INTERACTIONS
+-- WIRE
 ----------------------------------------------------
-local function updateToggle(button, isToggled)
-    local badge = button:FindFirstChild("Badge")
-    if badge then
-        if isToggled then
-            badge.Text             = "ON"
-            badge.BackgroundColor3 = BTN_WHITE
-            badge.TextColor3       = BTN_TEXT
-        else
-            badge.Text             = "OFF"
-            badge.BackgroundColor3 = OFF_COLOR
-            badge.TextColor3       = TEXT_DIM
-        end
-    end
+local function wire(key, row, setFn, onEn, onDis)
+    onClick(row, function()
+        flags[key] = not flags[key]
+        setFn(flags[key])
+        if flags[key] then if onEn  then onEn()  end
+        else               if onDis then onDis() end end
+    end)
 end
 
-NPCToggle.Activated:Connect(function()
-    isNPCToggled = not isNPCToggled
-    updateToggle(NPCToggle, isNPCToggled)
-end)
+wire("npc",    NPCRow,    setNPC,
+    nil, function() npcCache = {}; timers.attack = 0 end)
+wire("player", PlayerRow, setPlayer,
+    nil, function() playerCache = {}; timers.attack = 0 end)
+wire("self",   SelfRow,   setSelf,   rebuildCache, rebuildCache)
+wire("heal",   HealRow,   setHeal,
+    function() timers.heal = 0 end, function() timers.heal = 0 end)
 
-PlayerToggle.Activated:Connect(function()
-    isPlayerKillToggled = not isPlayerKillToggled
-    updateToggle(PlayerToggle, isPlayerKillToggled)
+onClick(AtkSet, function()
+    local v = tonumber(AtkBox.Text)
+    if v and v > 0.01 then intervals.attack = v
+        LocalPlayer:SetAttribute("SavedAttackInterval", v)
+    else AtkBox.Text = string.format("%.2f", intervals.attack) end
 end)
-
-SelfToggle.Activated:Connect(function()
-    isSelfTargetToggled = not isSelfTargetToggled
-    updateToggle(SelfToggle, isSelfTargetToggled)
-    updateCaches() -- Refresh to include/exclude local player
+onClick(HealSet, function()
+    local v = tonumber(HealBox.Text)
+    if v and v > 0.01 then intervals.heal = v
+        LocalPlayer:SetAttribute("SavedHealInterval", v)
+    else HealBox.Text = string.format("%.2f", intervals.heal) end
 end)
-
-SetButton.Activated:Connect(function()
-    local newVal = tonumber(IntervalBox.Text)
-    if newVal and newVal > 0.01 then
-        AttackInterval = newVal
-        LocalPlayer:SetAttribute("SavedAttackInterval", newVal)
-    end
-end)
-
-ToggleButton.Activated:Connect(function()
-    Frame.Visible = not Frame.Visible
-    ToggleButton.Text = Frame.Visible and "x" or "+"
+onClick(Pill, function()
+    Frame.Visible   = not Frame.Visible
+    Pill.TextColor3 = Frame.Visible and C.white or C.dim
+    pillS.Color     = Frame.Visible and C.bordHi or C.border
 end)
 
 ----------------------------------------------------
--- 5. DRAG LOGIC (Simplified for brevity)
+-- DRAG
 ----------------------------------------------------
-local function setupDrag(gui)
-    local dragging, dragInput, dragStart, startPos
-    gui.InputBegan:Connect(function(input)
-        if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
-            dragging = true
-            dragStart = input.Position
-            startPos = gui.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+local function setupDrag(handle, target)
+    local drag, ds, sp
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            drag = true; ds = i.Position; sp = target.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then drag = false end
             end)
         end
     end)
-    gui.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - dragStart
-            gui.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    handle.InputChanged:Connect(function(i)
+        if drag and (i.UserInputType == Enum.UserInputType.MouseMovement
+                  or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - ds
+            target.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X,
+                                        sp.Y.Scale, sp.Y.Offset + d.Y)
         end
     end)
 end
-setupDrag(Frame)
-setupDrag(ToggleButton)
+
+setupDrag(Header, Frame)
+setupDrag(Pill,   Pill)
 
 ----------------------------------------------------
--- 6. CORE ATTACK LOOP
+-- HEARTBEAT
 ----------------------------------------------------
 RunService.Heartbeat:Connect(function()
     local now = os.clock()
-    if now - lastAttackTime < AttackInterval then return end
-    if not (isNPCToggled or isPlayerKillToggled) then return end
-    lastAttackTime = now
 
-    local combinedTargets = {}
-    if isNPCToggled then
-        for model in pairs(npcModelCache) do
-            local hum = model:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 then table.insert(combinedTargets, model) end
+    if (flags.npc or flags.player) and (now - timers.attack >= intervals.attack) then
+        timers.attack = now
+        local targets = {}
+        if flags.npc then
+            for m in pairs(npcCache) do
+                local h = m:FindFirstChildOfClass("Humanoid")
+                if h and h.Health > 0 then table.insert(targets, m) end
+            end
+        end
+        if flags.player then
+            for m in pairs(playerCache) do
+                local h = m:FindFirstChildOfClass("Humanoid")
+                if h and h.Health > 0 then table.insert(targets, m) end
+            end
+        end
+        if #targets > 0 and (flags.npc or flags.player) then
+            RemoteEvent:FireServer({
+                hb = targets, action = "hit",
+                combo = 1, c = Character,
+                damage = 99999999999999,
+            })
         end
     end
-    if isPlayerKillToggled then
-        for model in pairs(playerCharCache) do
-            local hum = model:FindFirstChildOfClass("Humanoid")
-            if hum and hum.Health > 0 then table.insert(combinedTargets, model) end
-        end
-    end
 
-    if #combinedTargets > 0 then
-        RemoteEvent:FireServer({
-            hb     = combinedTargets,
-            action = "hit",
-            combo  = 1,
-            c      = Character,
-            damage = 99999999999999
-        })
+    if flags.heal and (now - timers.heal >= intervals.heal) then
+        timers.heal = now
+        if Character then
+            local h = Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 and flags.heal then
+                RemoteEvent:FireServer({
+                    hb = { Character }, action = "hit",
+                    combo = 1, c = Character,
+                    damage = -HEAL_AMOUNT,
+                })
+            end
+        end
     end
 end)
