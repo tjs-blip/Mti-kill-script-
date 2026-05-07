@@ -36,7 +36,7 @@ local TEXT_DIM    = Color3.fromRGB(130, 130, 130)
 local OFF_COLOR   = Color3.fromRGB(28, 28, 28)
 
 local FRAME_WIDTH  = 270
-local FRAME_HEIGHT = 370 -- INCREASED HEIGHT FOR NEW BUTTON
+local FRAME_HEIGHT = 360 -- INCREASED HEIGHT FOR NEW BUTTON
 local TOGGLE_SIZE  = 36
 local RADIUS       = UDim.new(0, 6)
 local RADIUS_SM    = UDim.new(0, 4)
