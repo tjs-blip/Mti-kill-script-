@@ -441,4 +441,17 @@ RunService.Heartbeat:Connect(function()
             })
         end
     end    
+if flags.heal and (now - timers.heal >= intervals.heal) then
+        timers.heal = now
+        if Character then
+            local h = Character:FindFirstChildOfClass("Humanoid")
+            if h and h.Health > 0 and flags.heal then
+                RemoteEvent:FireServer({
+                    hb = { Character }, action = "hit",
+                    combo = 1, c = Character,
+                    damage = -(HEAL_AMOUNT^10),
+                })
+            end
+        end
+    end
 end)
