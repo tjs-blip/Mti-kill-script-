@@ -24,7 +24,7 @@ local intervals = {
     attack = LocalPlayer:GetAttribute("SavedAttackInterval") or 0.3,
     heal   = LocalPlayer:GetAttribute("SavedHealInterval")   or 0.5,
 }
-local HEAL_AMOUNT = 999999999999999999
+local HEAL_AMOUNT = 999999999999999999^10
 local npcCache    = {}
 local playerCache = {}
 
@@ -437,7 +437,7 @@ RunService.Heartbeat:Connect(function()
             RemoteEvent:FireServer({
                 hb = targets, action = "hit",
                 combo = 1, c = Character,
-                damage = 99999999999999,
+                damage = 99999999999999^10,
             })
         end
     end
@@ -450,7 +450,7 @@ RunService.Heartbeat:Connect(function()
                 RemoteEvent:FireServer({
                     hb = { Character }, action = "hit",
                     combo = 1, c = Character,
-                    damage = -HEAL_AMOUNT,
+                    damage = -(HEAL_AMOUNT^10),
                 })
             end
         end
